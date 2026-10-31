@@ -60,7 +60,7 @@ becomes the partition key (decided per tenant, see roadmap).
 
 - Safe, fast rollback and a full audit trail of who activated what.
 - Experiment results still need to be measured: linking the resolved `version` to quality metrics
-  is the job of the evaluation pipeline (Step 11).
+  is the job of the evaluation pipeline (Step 12).
 - In-memory storage loses data on restart; a persistent adapter is required before production.
 - Changing an experiment's weights mid-run moves some users between variants; stop and start a new
   experiment instead when a clean comparison matters.
