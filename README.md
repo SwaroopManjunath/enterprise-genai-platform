@@ -5,32 +5,32 @@ microservices, an Azure OpenAI gateway with fallback, hybrid RAG on Azure AI Sea
 gateway, Entra ID (OIDC/JWT) auth, evaluation gates in CI, OpenTelemetry observability and AKS
 deployment.
 
-> **Honest status:** this is built step by step in the open. Four services and a shared library are
-> done and tested, running on **local stand-ins** (in-memory queue, index and stores; a mock LLM).
-> Nothing has been run against real Azure yet, and the end-to-end "ask a question, get a cited
-> answer" path is the next milestone. The diagram below is the **target**, colour-coded by what
-> exists today.
+> **Honest status:** this is built step by step in the open. Four services and two shared libraries
+> (including authentication) are done and tested, running on **local stand-ins** (in-memory queue,
+> index and stores; a mock LLM; locally generated signing keys instead of Entra ID). Nothing has
+> been run against real Azure yet, and the end-to-end "ask a question, get a cited answer" path is
+> the next milestone. The diagram below is the **target**, colour-coded by what exists today.
 
 ## Status
 
 ✅ Done · 🚧 In progress · 📋 Planned
 
-| Area                 | Status     | What exists today                                                    | Still stubbed or missing                           |
-| -------------------- | ---------- | -------------------------------------------------------------------- | -------------------------------------------------- |
-| Monorepo, CI, ADRs   | ✅ Done    | npm workspaces, strict TS, lint/format, commit hooks, GitHub Actions | -                                                  |
-| LLM gateway          | ✅ Done    | Rate limits, token quotas, retries, fallback, error mapping          | Azure client untested against real Azure; no cache |
-| Prompt registry      | ✅ Done    | Versions, audited rollback, sticky A/B, safe templates               | In-memory storage (no Cosmos DB yet)               |
-| Ingestion pipeline   | ✅ Done    | Queue with DLQ, chunking per file type, idempotent indexing          | In-memory queue/index; no PDF/Office; 200 KB limit |
-| Retrieval service    | ✅ Done    | BM25 + vector, rank fusion, rerank, role/tenant trimming             | Hash embedder (spelling, not meaning); in-memory   |
-| Auth (Entra ID)      | 📋 Planned | Interim `x-tenant-id` / `x-roles` headers                            | JWT validation, on-behalf-of flow, Key Vault       |
-| **Vertical slice**   | 📋 Planned | -                                                                    | Login, ask, cited answer through all of the above  |
-| Guardrails           | 📋 Planned | -                                                                    | PII redaction, injection checks, output filtering  |
-| Agent orchestrator   | 📋 Planned | -                                                                    | Tool calling, step limits, human approval          |
-| MCP gateway          | 📋 Planned | -                                                                    | Server registry, permissions, audit log            |
-| Cost and performance | 📋 Planned | Per-tenant token quota in the gateway                                | Semantic cache, cost tracking, streaming           |
-| Evaluation pipeline  | 📋 Planned | -                                                                    | Groundedness/relevance gates that block deploys    |
-| Observability        | 📋 Planned | -                                                                    | OpenTelemetry traces, SLO dashboards, alerts       |
-| Delivery             | 📋 Planned | -                                                                    | Docker, Helm, AKS, canary rollout, Bicep/Terraform |
+| Area                 | Status     | What exists today                                                    | Still stubbed or missing                                       |
+| -------------------- | ---------- | -------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Monorepo, CI, ADRs   | ✅ Done    | npm workspaces, strict TS, lint/format, commit hooks, GitHub Actions | -                                                              |
+| LLM gateway          | ✅ Done    | Rate limits, token quotas, retries, fallback, error mapping          | Azure client untested against real Azure; no cache             |
+| Prompt registry      | ✅ Done    | Versions, audited rollback, sticky A/B, safe templates               | In-memory storage (no Cosmos DB yet)                           |
+| Ingestion pipeline   | ✅ Done    | Queue with DLQ, chunking per file type, idempotent indexing          | In-memory queue/index; no PDF/Office; 200 KB limit             |
+| Retrieval service    | ✅ Done    | BM25 + vector, rank fusion, rerank, role/tenant trimming             | Hash embedder (spelling, not meaning); in-memory               |
+| Auth (Entra ID)      | ✅ Done    | JWT validation, secure-by-default guard, role gates, OBO client      | Not run against real Entra ID; OBO and Key Vault not wired yet |
+| **Vertical slice**   | 📋 Planned | -                                                                    | Login, ask, cited answer through all of the above              |
+| Guardrails           | 📋 Planned | -                                                                    | PII redaction, injection checks, output filtering              |
+| Agent orchestrator   | 📋 Planned | -                                                                    | Tool calling, step limits, human approval                      |
+| MCP gateway          | 📋 Planned | -                                                                    | Server registry, permissions, audit log                        |
+| Cost and performance | 📋 Planned | Per-tenant token quota in the gateway                                | Semantic cache, cost tracking, streaming                       |
+| Evaluation pipeline  | 📋 Planned | -                                                                    | Groundedness/relevance gates that block deploys                |
+| Observability        | 📋 Planned | -                                                                    | OpenTelemetry traces, SLO dashboards, alerts                   |
+| Delivery             | 📋 Planned | -                                                                    | Docker, Helm, AKS, canary rollout, Bicep/Terraform             |
 
 ## Architecture (target)
 
@@ -64,48 +64,60 @@ flowchart LR
 
 Everything below was produced by running the code in this repository.
 
-**Test suite** (`npm test`, also run by CI on every pull request):
+**Test suite** (`npm test`, also run by CI on every pull request, from a clean checkout):
 
 | Package                  | Tests   |
 | ------------------------ | ------- |
-| `@genai/llm-gateway`     | 44      |
-| `@genai/prompt-registry` | 56      |
-| `@genai/ingestion`       | 57      |
-| `@genai/retrieval`       | 62      |
+| `@genai/llm-gateway`     | 49      |
+| `@genai/prompt-registry` | 59      |
+| `@genai/ingestion`       | 59      |
+| `@genai/retrieval`       | 64      |
+| `@genai/auth`            | 59      |
 | `@genai/shared`          | 9       |
-| **Total**                | **228** |
+| **Total**                | **299** |
 
 Format check, lint, typecheck and build also pass in CI. Many of these are end-to-end HTTP tests
-(failure injection, tenant isolation, access trimming), not just unit tests.
+(failure injection, tenant isolation, access trimming, forged and expired tokens, spoofed headers),
+not just unit tests.
 
-**A real run: the same question from two callers with different roles**, against the running
-retrieval service (the confidential document is restricted to `manager`):
+**A real run: the same question from callers with different roles**, against the running retrieval
+service. Tokens are genuinely signed RS256 JWTs from the local `dev-token` tool; the confidential
+document is restricted to `manager`:
 
 ```text
-$ curl -X POST localhost:3003/v1/search -H 'x-tenant-id: acme-bank' -H 'x-roles: analyst' \
+$ curl -X POST localhost:3003/v1/search -H "authorization: Bearer $ANALYST" \
        -d '{"query":"salary bands managers"}'
   (no results)
 
-$ curl -X POST localhost:3003/v1/search -H 'x-tenant-id: acme-bank' -H 'x-roles: manager' \
+$ curl -X POST localhost:3003/v1/search -H "authorization: Bearer $ANALYST" \
+       -H 'x-roles: manager' -d '{"query":"salary bands managers"}'     # spoof attempt
+  (no results)
+
+$ curl -X POST localhost:3003/v1/search -H "authorization: Bearer $MANAGER" \
        -d '{"query":"salary bands managers"}'
-  salary:0  score 1.5  { keywordRank: 1, keywordScore: 3.278, vectorRank: 1,
-                         vectorScore: 0.83, fusedScore: 0.033, rerankScore: 1.5 }
+  salary:0  score 1.5
+
+$ curl -X PUT localhost:3003/v1/index/documents/x -H "authorization: Bearer $ANALYST" ...
+  403 forbidden            # end users cannot write to the index
+$ curl -X POST localhost:3003/v1/search -d '{"query":"x"}'
+  401 unauthorized         # no token
 ```
 
-The analyst never sees the document, and it cannot even influence the analyst's scores (there is a
-test for that). Each result explains why it ranked where it did.
+Roles come from the signed token, so asking nicely with a header changes nothing. Each search result
+also explains why it ranked where it did (keyword, vector, fused and rerank signals).
 
 ## Repository layout
 
-| Path                   | Purpose                                                                              |
-| ---------------------- | ------------------------------------------------------------------------------------ |
-| `apps/llm-gateway`     | Azure OpenAI gateway: limits, retries, fallback ([docs](apps/llm-gateway/README.md)) |
-| `apps/prompt-registry` | Versioned prompts, rollback, A/B ([docs](apps/prompt-registry/README.md))            |
-| `apps/ingestion`       | Queue-driven document ingestion ([docs](apps/ingestion/README.md))                   |
-| `apps/retrieval`       | Hybrid search with access trimming ([docs](apps/retrieval/README.md))                |
-| `packages/shared`      | `@genai/shared`: tenant context and cross-service helpers                            |
-| `docs/adr`             | Architecture decision records: why X over Y                                          |
-| `.github/`             | CI workflow and PR template                                                          |
+| Path                   | Purpose                                                                                       |
+| ---------------------- | --------------------------------------------------------------------------------------------- |
+| `apps/llm-gateway`     | Azure OpenAI gateway: limits, retries, fallback ([docs](apps/llm-gateway/README.md))          |
+| `apps/prompt-registry` | Versioned prompts, rollback, A/B ([docs](apps/prompt-registry/README.md))                     |
+| `apps/ingestion`       | Queue-driven document ingestion ([docs](apps/ingestion/README.md))                            |
+| `apps/retrieval`       | Hybrid search with access trimming ([docs](apps/retrieval/README.md))                         |
+| `packages/auth`        | `@genai/auth`: JWT validation, guard, on-behalf-of, secrets ([docs](packages/auth/README.md)) |
+| `packages/shared`      | `@genai/shared`: tenant context and cross-service helpers                                     |
+| `docs/adr`             | Architecture decision records: why X over Y                                                   |
+| `.github/`             | CI workflow and PR template                                                                   |
 
 ## Getting started
 
@@ -116,7 +128,10 @@ npm install
 npm run lint && npm run typecheck && npm test
 ```
 
-Try a service locally with no cloud account (each README has copy-paste `curl` commands):
+Services require authentication. Locally you mint real signed tokens with the dev tool, no cloud
+account needed (`eval "$(npm run -s dev-token -w @genai/auth -- env)"`, see
+[packages/auth](packages/auth/README.md#local-development-real-tokens-no-bypass)). Each README has
+copy-paste `curl` commands:
 [llm-gateway](apps/llm-gateway/README.md#run-it-locally-no-cloud-account-needed),
 [prompt-registry](apps/prompt-registry/README.md#run-it-locally),
 [ingestion](apps/ingestion/README.md#run-it-locally) and
@@ -137,8 +152,9 @@ building the remaining pieces, so there is always a demonstrable system.
       chunking, idempotent re-indexing, retries with backoff, dead-letter queue (ADR 0005)
 - [x] **Step 5: Retrieval service.** Hybrid keyword + vector search, rank fusion, reranking,
       pre-filtered per-tenant and per-role access trimming (ADR 0006)
-- [ ] **Step 6: Auth.** Entra ID OIDC, JWT validation, on-behalf-of flow, Key Vault. Replaces the
-      interim identity headers on every service
+- [x] **Step 6: Auth.** JWT validation (RS256, issuer, audience, expiry), secure-by-default guard,
+      role-gated admin operations, on-behalf-of client, secret providers; replaces the interim
+      identity headers on every service (ADR 0007)
 - [ ] **Step 7: Vertical slice.** A new `assistant` service: validate the user's token, retrieve
       access-trimmed chunks, render a prompt from the registry, call the gateway, return an answer
       with citations. End-to-end test: two users ask the same question and get different, correctly
