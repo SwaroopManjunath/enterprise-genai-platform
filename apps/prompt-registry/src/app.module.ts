@@ -1,3 +1,4 @@
+import { authProviders } from '@genai/auth';
 import { Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { HealthController } from './health.controller';
@@ -17,6 +18,7 @@ import { RegistryExceptionFilter } from './registry/registry-exception.filter';
       useFactory: (repo: PromptRepository) => new PromptRegistryService(repo),
     },
     { provide: APP_FILTER, useClass: RegistryExceptionFilter },
+    ...authProviders(),
   ],
 })
 export class AppModule {}
