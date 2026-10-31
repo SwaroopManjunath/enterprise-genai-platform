@@ -99,10 +99,15 @@ function classify(error: unknown): ConstructorParameters<typeof AuthenticationEr
 }
 
 /** Builds the verifier from configuration: remote key set in production, a file in development. */
-export function createTokenVerifier(config: AuthConfig): TokenVerifier {
+export function createTokenVerifier(
+  config: AuthConfig,
+  options: { jwksCooldownMs?: number } = {},
+): TokenVerifier {
   const keys: JWTVerifyGetKey = config.jwksUrl
     ? createRemoteJWKSet(new URL(config.jwksUrl), {
-        cooldownDuration: 30_000,
+        // Minimum gap between key refetches, so unknown key ids cannot be used to hammer the
+        // identity provider. Configurable only so tests can exercise rotation quickly.
+        cooldownDuration: options.jwksCooldownMs ?? 30_000,
         timeoutDuration: 5_000,
       })
     : createLocalJWKSet(JSON.parse(readFileSync(config.jwksFile as string, 'utf8')));
