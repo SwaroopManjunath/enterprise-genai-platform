@@ -55,6 +55,15 @@ describe('SearchService modes', () => {
     expect(idsOf(vector)[0]).toBe('refunds');
   });
 
+  it('keeps a vector-found word-form match alive through reranking', async () => {
+    const { search } = await seeded();
+
+    const [top] = await search.search(analyst, request('refunding', { mode: 'vector' }));
+
+    expect(top?.documentId).toBe('refunds');
+    expect(top?.signals.rerankScore).toBeGreaterThan(0.9);
+  });
+
   it('hybrid combines what each retriever finds', async () => {
     const { search } = await seeded();
 

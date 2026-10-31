@@ -30,6 +30,22 @@ describe('OverlapReranker', () => {
     expect(ranked[0]?.id).toBe('ordered');
   });
 
+  it('treats word forms as the same term, but not unrelated words', async () => {
+    const ranked = await reranker.rerank('refunding', [
+      { id: 'form', text: 'Refunds take five working days' },
+      { id: 'other', text: 'Reports are generated monthly' },
+    ]);
+
+    expect(ranked[0]).toMatchObject({ id: 'form' });
+    expect(ranked[0]?.score).toBeGreaterThan(0.9);
+    expect(ranked[1]?.score).toBe(0);
+  });
+
+  it('does not stem very short words', async () => {
+    const [ranked] = await reranker.rerank('car', [{ id: 'a', text: 'cards and cart' }]);
+    expect(ranked?.score).toBe(0);
+  });
+
   it('scores everything 0 when the query has no usable terms', async () => {
     const ranked = await reranker.rerank('the of', [{ id: 'a', text: 'anything' }]);
     expect(ranked).toEqual([{ id: 'a', score: 0 }]);

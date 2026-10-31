@@ -24,11 +24,11 @@ export class OverlapReranker implements Reranker {
       if (terms.length === 0) return { id: candidate.id, score: 0 };
 
       const textTokens = tokenize(candidate.text);
-      const textSet = new Set(textTokens);
-      const headingSet = new Set(tokenize((candidate.headingPath ?? []).join(' ')));
+      const headingTokens = tokenize((candidate.headingPath ?? []).join(' '));
 
-      const coverage = terms.filter((t) => textSet.has(t)).length / terms.length;
-      const headingCoverage = terms.filter((t) => headingSet.has(t)).length / terms.length;
+      const coverage = terms.filter((t) => containsForm(textTokens, t)).length / terms.length;
+      const headingCoverage =
+        terms.filter((t) => containsForm(headingTokens, t)).length / terms.length;
 
       const textBigrams = new Set(bigrams(textTokens));
       const orderScore =
@@ -44,6 +44,25 @@ export class OverlapReranker implements Reranker {
 
     return Promise.resolve(scored.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id)));
   }
+}
+
+/**
+ * True when `tokens` holds the term or a close word form of it ("refund", "refunds", "refunding").
+ * Forms match when they share a long enough prefix relative to the shorter word. This is crude
+ * stemming on purpose: without it the reranker would score a vector-retrieved chunk 0 and undo the
+ * recall the vector retriever exists to provide.
+ */
+function containsForm(tokens: readonly string[], term: string): boolean {
+  return tokens.some((token) => token === term || sameWordForm(token, term));
+}
+
+function sameWordForm(a: string, b: string): boolean {
+  const shorter = Math.min(a.length, b.length);
+  if (shorter < 4) return false;
+
+  let common = 0;
+  while (common < shorter && a[common] === b[common]) common++;
+  return common >= Math.max(4, Math.ceil(shorter * 0.75));
 }
 
 function bigrams(tokens: readonly string[]): string[] {
