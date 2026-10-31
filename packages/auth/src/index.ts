@@ -6,3 +6,4 @@ export * from './token-verifier';
 export * from './secrets';
 export * from './obo/obo-client';
 export * from './dev-keys';
+export * from './dev-token-endpoint';

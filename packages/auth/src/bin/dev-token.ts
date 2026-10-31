@@ -1,11 +1,16 @@
 #!/usr/bin/env node
 import { join } from 'node:path';
 import { devEnvironment, loadOrCreateDevIssuer } from '../dev-keys';
+import { startDevTokenEndpoint } from '../dev-token-endpoint';
 
 const USAGE = `Local development tokens (NOT for production).
 
   dev-token env                          print the AUTH_* exports a service needs
   dev-token mint --tenant <slug> [--user <id>] [--roles a,b] [--expires <seconds>]
+                 [--audience <api://app>]
+  dev-token obo-server [--port 4000] [--client-id assistant] [--client-secret dev-secret]
+                       [--audience api://assistant]
+                                         stand-in for Entra's on-behalf-of token endpoint
 
 Keys live in ./.dev-keys (override with GENAI_DEV_KEYS_DIR). Example:
 
@@ -25,7 +30,7 @@ function flags(args: string[]): Record<string, string> {
   return result;
 }
 
-function main(argv: string[]): void {
+async function main(argv: string[]): Promise<void> {
   const [command, ...rest] = argv;
   // npm runs workspace scripts from the package folder; INIT_CWD is where the user ran npm.
   const keysDir =
@@ -55,8 +60,29 @@ function main(argv: string[]): void {
             .filter(Boolean),
         }),
         ...(f['expires'] && { expiresInSec: Number(f['expires']) }),
+        ...(f['audience'] && { audience: f['audience'] }),
       }),
     );
+    return;
+  }
+
+  if (command === 'obo-server') {
+    const f = flags(rest);
+    const clientId = f['client-id'] ?? 'assistant';
+    const endpoint = await startDevTokenEndpoint(
+      {
+        issuer: dev.issuer,
+        clients: {
+          [clientId]: {
+            secret: f['client-secret'] ?? 'dev-secret',
+            audience: f['audience'] ?? 'api://assistant',
+          },
+        },
+      },
+      Number(f['port'] ?? 4000),
+    );
+    console.error(`dev OBO token endpoint for client "${clientId}": ${endpoint.url}`);
+    console.error('development only; press Ctrl-C to stop');
     return;
   }
 
@@ -64,9 +90,7 @@ function main(argv: string[]): void {
   process.exitCode = command ? 1 : 0;
 }
 
-try {
-  main(process.argv.slice(2));
-} catch (error) {
+main(process.argv.slice(2)).catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : error);
   process.exitCode = 1;
-}
+});
