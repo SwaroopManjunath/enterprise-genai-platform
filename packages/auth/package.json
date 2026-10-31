@@ -1,0 +1,34 @@
+{
+  "name": "@genai/auth",
+  "version": "0.1.0",
+  "private": true,
+  "description": "JWT validation, NestJS guard, on-behalf-of token exchange and secret providers.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "genai-dev-token": "dist/bin/dev-token.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "jest",
+    "dev-token": "ts-node src/bin/dev-token.ts"
+  },
+  "dependencies": {
+    "@genai/shared": "0.1.0",
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "jose": "^5.10.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@nestjs/platform-express": "^11.0.0",
+    "@nestjs/testing": "^11.0.0",
+    "@types/express": "^5.0.0",
+    "@types/supertest": "^6.0.2",
+    "supertest": "^7.0.0",
+    "ts-node": "^10.9.2"
+  }
+}
