@@ -1,4 +1,6 @@
 import { createHmac, generateKeyPairSync, randomUUID, sign, type KeyObject } from 'node:crypto';
+import { createLocalJWKSet, type JSONWebKeySet } from 'jose';
+import { TokenVerifier } from './token-verifier';
 
 export interface MintOptions {
   tenant: string;
@@ -48,6 +50,19 @@ export class TestIssuer {
         { ...this.publicKey.export({ format: 'jwk' }), kid: this.kid, alg: 'RS256', use: 'sig' },
       ],
     };
+  }
+
+  /** A verifier that trusts exactly this issuer's key: what tests plug into a service. */
+  verifier(clockToleranceSec = 30): TokenVerifier {
+    return new TokenVerifier(
+      {
+        issuer: this.issuer,
+        audience: this.audience,
+        tenantClaim: 'tid',
+        clockToleranceSec,
+      },
+      createLocalJWKSet(this.jwks() as unknown as JSONWebKeySet),
+    );
   }
 
   /** Synchronous so test helpers stay simple. Signs with RS256. */
