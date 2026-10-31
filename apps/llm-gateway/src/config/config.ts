@@ -25,8 +25,12 @@ export type ResolvedAzureDeployment = Omit<AzureDeploymentConfig, 'apiKey' | 'ap
 
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
-  /** "mock" runs without any cloud dependency; "azure" talks to Azure OpenAI. */
-  LLM_PROVIDER: z.enum(['mock', 'azure']).default('mock'),
+  /**
+   * "mock" echoes; "mock-grounded" is a deterministic stand-in for a model that answers from
+   * numbered sources and cites them (for running the whole assistant path locally);
+   * "azure" talks to Azure OpenAI.
+   */
+  LLM_PROVIDER: z.enum(['mock', 'mock-grounded', 'azure']).default('mock'),
   /** JSON array of deployments, ordered by preference: first is primary, rest are fallbacks. */
   AZURE_OPENAI_DEPLOYMENTS: z.string().default('[]'),
   UPSTREAM_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
@@ -39,7 +43,7 @@ const envSchema = z.object({
 
 export interface GatewayConfig {
   port: number;
-  provider: 'mock' | 'azure';
+  provider: 'mock' | 'mock-grounded' | 'azure';
   deployments: AzureDeploymentConfig[];
   upstreamTimeoutMs: number;
   retry: { maxAttempts: number; baseDelayMs: number; maxDelayMs: number };
