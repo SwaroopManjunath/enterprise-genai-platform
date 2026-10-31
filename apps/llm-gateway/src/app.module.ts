@@ -14,6 +14,7 @@ import { HealthController } from './health.controller';
 import { InMemoryTokenBucketRateLimiter, RATE_LIMITER } from './limits/rate-limiter';
 import { InMemoryTokenQuota, TOKEN_QUOTA } from './limits/token-quota';
 import { AzureOpenAiProvider } from './llm/azure-openai.provider';
+import { GroundedMockProvider } from './llm/grounded-mock.provider';
 import { MockProvider } from './llm/mock.provider';
 import { resolveDeployments } from './llm/resolve-deployments';
 import { LLM_PROVIDERS, type LlmProvider } from './llm/types';
@@ -26,6 +27,7 @@ async function buildProviders(
   secrets: SecretProvider,
 ): Promise<LlmProvider[]> {
   if (config.provider === 'mock') return [new MockProvider()];
+  if (config.provider === 'mock-grounded') return [new GroundedMockProvider()];
   const deployments = await resolveDeployments(config.deployments, secrets);
   return deployments.map((d) => new AzureOpenAiProvider(d, config.upstreamTimeoutMs));
 }
