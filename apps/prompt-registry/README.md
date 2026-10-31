@@ -27,24 +27,32 @@ flowchart LR
 ```bash
 npm install
 npm run build
+eval "$(npm run -s dev-token -w @genai/auth -- env)"   # trust locally minted dev tokens
 PORT=3001 node apps/prompt-registry/dist/main.js
 ```
 
 ```bash
+# a prompt-admin token to publish, and a plain member token to read and resolve
+ADMIN=$(npm run -s dev-token -w @genai/auth -- mint --tenant acme-bank --user alice --roles prompt-admin)
+MEMBER=$(npm run -s dev-token -w @genai/auth -- mint --tenant acme-bank --user bob --roles analyst)
+
 # publish a version (the first one becomes active)
 curl -s -X POST localhost:3001/v1/prompts/support-reply/versions \
-  -H 'content-type: application/json' -H 'x-tenant-id: acme-bank' \
+  -H 'content-type: application/json' -H "authorization: Bearer $ADMIN" \
   -d '{"template":"Answer politely: {{question}}"}'
 
 # resolve it
 curl -s -X POST localhost:3001/v1/prompts/support-reply/resolve \
-  -H 'content-type: application/json' -H 'x-tenant-id: acme-bank' \
+  -H 'content-type: application/json' -H "authorization: Bearer $MEMBER" \
   -d '{"variables":{"question":"Where is my card?"}}'
 ```
 
 ## API
 
-All routes need `x-tenant-id` (interim; replaced by token claims in Step 6). `x-user-id` is recorded
+All routes need `Authorization: Bearer <JWT>`; tenant and actor come from the verified token (see
+[ADR 0007](../../docs/adr/0007-authentication-and-authorization.md)). Reading and resolving are open to
+any member of the tenant; publishing, activating, rolling back and experiments need the
+`prompt-admin` role (403 otherwise). The token's user is recorded
 as the actor in the history.
 
 | Method | Path                            | Purpose                                       |
@@ -61,6 +69,8 @@ as the actor in the history.
 | Status | `error.code`                                                                                     |
 | ------ | ------------------------------------------------------------------------------------------------ |
 | 400    | `invalid_tenant`, `invalid_request`, `invalid_prompt`, `invalid_experiment`, `missing_variables` |
+| 401    | `unauthorized` (missing, expired or invalid token)                                               |
+| 403    | `forbidden` (authenticated but missing the `prompt-admin` role)                                  |
 | 404    | `prompt_not_found`, `version_not_found`                                                          |
 | 409    | `conflict` (concurrent edit; reload and retry)                                                   |
 
