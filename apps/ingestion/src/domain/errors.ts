@@ -23,3 +23,34 @@ export class EmptyDocumentError extends PermanentIngestionError {
     this.name = 'EmptyDocumentError';
   }
 }
+
+export class DocumentTooLargeError extends Error {
+  constructor(
+    readonly bytes: number,
+    readonly maxBytes: number,
+  ) {
+    super(`Document is ${bytes} bytes; the limit is ${maxBytes}`);
+    this.name = 'DocumentTooLargeError';
+  }
+}
+
+export class JobNotFoundError extends Error {
+  constructor(jobId: string) {
+    super(`Ingestion job "${jobId}" not found`);
+    this.name = 'JobNotFoundError';
+  }
+}
+
+export class DocumentNotFoundError extends Error {
+  constructor(documentId: string) {
+    super(`Document "${documentId}" has not been indexed`);
+    this.name = 'DocumentNotFoundError';
+  }
+}
+
+export class DeadLetterNotFoundError extends Error {
+  constructor(jobId: string) {
+    super(`No dead-lettered job "${jobId}"`);
+    this.name = 'DeadLetterNotFoundError';
+  }
+}
