@@ -82,11 +82,11 @@ export class TestIssuer {
   }
 
   /** A verifier that trusts exactly this issuer's key: what tests plug into a service. */
-  verifier(clockToleranceSec = 30): TokenVerifier {
+  verifier(clockToleranceSec = 30, audience = this.audience): TokenVerifier {
     return new TokenVerifier(
       {
         issuer: this.issuer,
-        audience: this.audience,
+        audience,
         tenantClaim: 'tid',
         clockToleranceSec,
       },
