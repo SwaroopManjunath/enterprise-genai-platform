@@ -1,0 +1,13 @@
+{
+  "name": "@genai/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cross-service types and helpers (tenant context, request identity).",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "jest"
+  }
+}
