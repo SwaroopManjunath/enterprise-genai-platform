@@ -1,4 +1,12 @@
-import { createHmac, generateKeyPairSync, randomUUID, sign, type KeyObject } from 'node:crypto';
+import {
+  createHmac,
+  createPrivateKey,
+  createPublicKey,
+  generateKeyPairSync,
+  randomUUID,
+  sign,
+  type KeyObject,
+} from 'node:crypto';
 import { createLocalJWKSet, type JSONWebKeySet } from 'jose';
 import { TokenVerifier } from './token-verifier';
 
@@ -41,6 +49,27 @@ export class TestIssuer {
     this.privateKey = pair.privateKey;
     this.publicKey = pair.publicKey;
     this.kid = kid;
+  }
+
+  /** Rebuilds an issuer from a saved private key, so local tokens stay valid across restarts. */
+  static fromPrivateKeyPem(
+    pem: string,
+    issuer?: string,
+    audience?: string,
+    kid = 'dev-key-1',
+  ): TestIssuer {
+    const privateKey = createPrivateKey(pem);
+    return new TestIssuer(
+      issuer,
+      audience,
+      { privateKey, publicKey: createPublicKey(privateKey) },
+      kid,
+    );
+  }
+
+  /** The private key as PEM, for the dev-token tool to save. Never needed in production. */
+  privateKeyPem(): string {
+    return this.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
   }
 
   /** The public half as a JWKS document: what an identity provider publishes. */
