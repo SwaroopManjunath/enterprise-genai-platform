@@ -27,13 +27,14 @@ flowchart LR
 
 ## Repository layout
 
-| Path               | Purpose                                                                              |
-| ------------------ | ------------------------------------------------------------------------------------ |
-| `apps/llm-gateway` | Azure OpenAI gateway: limits, retries, fallback ([docs](apps/llm-gateway/README.md)) |
-| `apps/*`           | Deployable services (one Docker image each)                                          |
-| `packages/shared`  | `@genai/shared`: tenant context and cross-service helpers                            |
-| `docs/adr`         | Architecture decision records: why X over Y                                          |
-| `.github/`         | CI workflow and PR template                                                          |
+| Path                   | Purpose                                                                              |
+| ---------------------- | ------------------------------------------------------------------------------------ |
+| `apps/llm-gateway`     | Azure OpenAI gateway: limits, retries, fallback ([docs](apps/llm-gateway/README.md)) |
+| `apps/prompt-registry` | Versioned prompts, rollback, A/B ([docs](apps/prompt-registry/README.md))            |
+| `apps/*`               | Deployable services (one Docker image each)                                          |
+| `packages/shared`      | `@genai/shared`: tenant context and cross-service helpers                            |
+| `docs/adr`             | Architecture decision records: why X over Y                                          |
+| `.github/`             | CI workflow and PR template                                                          |
 
 ## Getting started
 
@@ -44,8 +45,9 @@ npm install
 npm run lint && npm run typecheck && npm test
 ```
 
-Try the gateway locally with no cloud account (mock provider): see
-[apps/llm-gateway](apps/llm-gateway/README.md#run-it-locally-no-cloud-account-needed).
+Try the services locally with no cloud account: see
+[apps/llm-gateway](apps/llm-gateway/README.md#run-it-locally-no-cloud-account-needed) and
+[apps/prompt-registry](apps/prompt-registry/README.md#run-it-locally).
 
 ## Roadmap
 
@@ -53,7 +55,8 @@ Try the gateway locally with no cloud account (mock provider): see
       commits with hooks, CI, ADRs, `@genai/shared` tenant context
 - [x] **Step 2: LLM gateway.** Per-tenant rate limits and token quotas, retries with jittered
       backoff, fallback deployment, error classification (ADR 0003)
-- [ ] **Step 3: Prompt registry.** Versioning, rollback, A/B comparison
+- [x] **Step 3: Prompt registry.** Append-only versions, audited rollback, sticky A/B
+      experiments, safe templates (ADR 0004)
 - [ ] **Step 4: Ingestion pipeline.** Queue-driven, per-file-type chunking, idempotent, DLQ
 - [ ] **Step 5: Retrieval service.** Hybrid search, reranking, per-tenant/per-role filters
 - [ ] **Step 6: Auth.** Entra ID OIDC, JWT validation, on-behalf-of flow, Key Vault
