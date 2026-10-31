@@ -1,5 +1,12 @@
-import { authProviders } from '@genai/auth';
-import { Module } from '@nestjs/common';
+import {
+  EntraClientCredentialsClient,
+  EnvSecretProvider,
+  SECRET_PROVIDER,
+  authProviders,
+  type SecretProvider,
+} from '@genai/auth';
+import { HttpJsonClient } from '@genai/shared';
+import { Logger, Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { INGESTION_CONFIG, loadConfig, type IngestionConfig } from './config/config';
 import type { IngestionJob } from './domain/job';
@@ -12,6 +19,7 @@ import { InMemoryQueue } from './queue/in-memory-queue';
 import { MESSAGE_QUEUE, type MessageQueue } from './queue/message-queue';
 import { CHUNK_INDEX, type ChunkIndex } from './store/chunk-index';
 import { InMemoryChunkIndex } from './store/in-memory-chunk-index';
+import { RetrievalChunkIndex } from './store/retrieval-chunk-index';
 import { InMemoryJobStore, JOB_STORE, type JobStore } from './store/job-store';
 import { IngestionWorker } from './worker/ingestion-worker';
 import { WorkerLoop } from './worker/worker-loop';
@@ -29,7 +37,35 @@ import { WorkerLoop } from './worker/worker-loop';
           visibilityTimeoutMs: c.visibilityTimeoutMs,
         }),
     },
-    { provide: CHUNK_INDEX, useFactory: () => new InMemoryChunkIndex() },
+    // Env-backed locally. In Azure, wire KeyVaultSecretProvider with a managed identity here.
+    { provide: SECRET_PROVIDER, useFactory: () => new EnvSecretProvider() },
+    {
+      provide: CHUNK_INDEX,
+      inject: [INGESTION_CONFIG, SECRET_PROVIDER],
+      useFactory: (c: IngestionConfig, secrets: SecretProvider): ChunkIndex => {
+        if (c.index.sink === 'memory') {
+          new Logger('ChunkIndex').warn(
+            'INDEX_SINK=memory: processed documents stay inside this process and are NOT ' +
+              'searchable. Set INDEX_SINK=retrieval to make uploads answerable.',
+          );
+          return new InMemoryChunkIndex();
+        }
+        return new RetrievalChunkIndex(
+          new HttpJsonClient({
+            service: 'retrieval',
+            baseUrl: c.index.url,
+            timeoutMs: c.index.timeoutMs,
+          }),
+          new EntraClientCredentialsClient({
+            tokenEndpoint: c.index.tokenEndpoint,
+            clientId: c.index.clientId,
+            clientSecretName: c.index.clientSecretName,
+            secrets,
+          }),
+          c.index.scope,
+        );
+      },
+    },
     { provide: JOB_STORE, useFactory: () => new InMemoryJobStore() },
     {
       provide: IngestionPipeline,
