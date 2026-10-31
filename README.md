@@ -27,12 +27,13 @@ flowchart LR
 
 ## Repository layout
 
-| Path              | Purpose                                                   |
-| ----------------- | --------------------------------------------------------- |
-| `apps/*`          | Deployable services (one Docker image each)               |
-| `packages/shared` | `@genai/shared`: tenant context and cross-service helpers |
-| `docs/adr`        | Architecture decision records: why X over Y               |
-| `.github/`        | CI workflow and PR template                               |
+| Path               | Purpose                                                                              |
+| ------------------ | ------------------------------------------------------------------------------------ |
+| `apps/llm-gateway` | Azure OpenAI gateway: limits, retries, fallback ([docs](apps/llm-gateway/README.md)) |
+| `apps/*`           | Deployable services (one Docker image each)                                          |
+| `packages/shared`  | `@genai/shared`: tenant context and cross-service helpers                            |
+| `docs/adr`         | Architecture decision records: why X over Y                                          |
+| `.github/`         | CI workflow and PR template                                                          |
 
 ## Getting started
 
@@ -43,12 +44,15 @@ npm install
 npm run lint && npm run typecheck && npm test
 ```
 
+Try the gateway locally with no cloud account (mock provider): see
+[apps/llm-gateway](apps/llm-gateway/README.md#run-it-locally-no-cloud-account-needed).
+
 ## Roadmap
 
 - [x] **Step 1: Foundation.** Monorepo, TypeScript strict config, lint/format, conventional
       commits with hooks, CI, ADRs, `@genai/shared` tenant context
-- [ ] **Step 2: LLM gateway.** Per-tenant rate limits and token quotas, retries with backoff,
-      fallback deployment
+- [x] **Step 2: LLM gateway.** Per-tenant rate limits and token quotas, retries with jittered
+      backoff, fallback deployment, error classification (ADR 0003)
 - [ ] **Step 3: Prompt registry.** Versioning, rollback, A/B comparison
 - [ ] **Step 4: Ingestion pipeline.** Queue-driven, per-file-type chunking, idempotent, DLQ
 - [ ] **Step 5: Retrieval service.** Hybrid search, reranking, per-tenant/per-role filters
