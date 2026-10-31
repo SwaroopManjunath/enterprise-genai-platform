@@ -28,28 +28,34 @@ flowchart LR
 ```bash
 npm install
 npm run build
+eval "$(npm run -s dev-token -w @genai/auth -- env)"   # trust locally minted dev tokens
 PORT=3003 node apps/retrieval/dist/main.js
 ```
 
 ```bash
-# index a document (restricted to managers)
+mint() { npm run -s dev-token -w @genai/auth -- mint --tenant acme-bank --roles "$1"; }
+
+# index a document (needs the `indexer` role), restricted to managers
 curl -s -X PUT localhost:3003/v1/index/documents/salary \
-  -H 'content-type: application/json' -H 'x-tenant-id: acme-bank' \
+  -H 'content-type: application/json' -H "authorization: Bearer $(mint indexer)" \
   -d '{"chunks":[{"index":0,"text":"Confidential salary bands for managers"}],"allowedRoles":["manager"]}'
 
 # search as an analyst (sees nothing) and as a manager (sees it)
 curl -s -X POST localhost:3003/v1/search \
-  -H 'content-type: application/json' -H 'x-tenant-id: acme-bank' -H 'x-roles: analyst' \
+  -H 'content-type: application/json' -H "authorization: Bearer $(mint analyst)" \
   -d '{"query":"salary bands"}'
 curl -s -X POST localhost:3003/v1/search \
-  -H 'content-type: application/json' -H 'x-tenant-id: acme-bank' -H 'x-roles: manager' \
+  -H 'content-type: application/json' -H "authorization: Bearer $(mint manager)" \
   -d '{"query":"salary bands"}'
 ```
 
 ## API
 
-Headers: `x-tenant-id` (required) and `x-roles` (comma-separated, optional). Both are interim and
-become validated token claims in Step 6.
+Every route needs `Authorization: Bearer <JWT>`. Tenant **and roles** come from the verified token
+(see [ADR 0007](../../docs/adr/0007-authentication-and-authorization.md)), so a client cannot widen
+what it sees by sending a header: that is what makes the access trimming trustworthy. Search is open
+to any authenticated user (and trimmed to their tenant and roles). Changing the index needs the
+`indexer` role, which belongs to the ingestion pipeline's service identity, not to end users.
 
 | Method | Path                      | Purpose                                          |
 | ------ | ------------------------- | ------------------------------------------------ |
@@ -66,10 +72,12 @@ rerank (default true), filter?: { documentIds?, tags? } }`.
 Each result carries `signals` (`keywordRank`, `keywordScore`, `vectorRank`, `vectorScore`,
 `fusedScore`, `rerankScore`) showing exactly why it ranked where it did.
 
-| Status | `error.code`                                         |
-| ------ | ---------------------------------------------------- |
-| 400    | `invalid_tenant`, `invalid_roles`, `invalid_request` |
-| 404    | `document_not_found` (delete)                        |
+| Status | `error.code`                                       |
+| ------ | -------------------------------------------------- |
+| 400    | `invalid_request`                                  |
+| 401    | `unauthorized` (missing, expired or invalid token) |
+| 403    | `forbidden` (index changes need `indexer`)         |
+| 404    | `document_not_found` (delete)                      |
 
 ## Local stand-ins
 
