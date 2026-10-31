@@ -4,3 +4,4 @@ export * from './principal';
 export * from './test-issuer';
 export * from './token-verifier';
 export * from './secrets';
+export * from './obo/obo-client';
