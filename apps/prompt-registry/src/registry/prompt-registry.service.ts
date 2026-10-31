@@ -1,7 +1,18 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { InvalidPromptError, PromptNotFoundError, VersionNotFoundError } from '../domain/errors';
-import { extractVariables } from '../domain/template';
-import type { ActivationEvent, PromptRecord, PromptVersion } from '../domain/types';
+import { pickVariant } from '../domain/bucketing';
+import {
+  InvalidExperimentError,
+  InvalidPromptError,
+  PromptNotFoundError,
+  VersionNotFoundError,
+} from '../domain/errors';
+import { extractVariables, renderTemplate } from '../domain/template';
+import type {
+  ActivationEvent,
+  ExperimentVariant,
+  PromptRecord,
+  PromptVersion,
+} from '../domain/types';
 import { PROMPT_REPOSITORY, type PromptRepository } from '../repository/prompt.repository';
 
 const NAME_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
@@ -123,4 +134,85 @@ export class PromptRegistryService {
 
     return this.repo.save(record);
   }
+
+  /**
+   * Splits traffic between existing versions by weight. Needs at least two distinct versions,
+   * each with a positive integer weight. Replaces any experiment already running.
+   */
+  async setExperiment(
+    tenantId: string,
+    name: string,
+    variants: ExperimentVariant[],
+  ): Promise<PromptRecord> {
+    const record = await this.get(tenantId, name);
+
+    if (variants.length < 2) throw new InvalidExperimentError('needs at least two variants');
+    if (new Set(variants.map((v) => v.version)).size !== variants.length) {
+      throw new InvalidExperimentError('each version may appear only once');
+    }
+    for (const variant of variants) {
+      if (!Number.isInteger(variant.weight) || variant.weight <= 0) {
+        throw new InvalidExperimentError('weights must be positive integers');
+      }
+      if (!record.versions.some((v) => v.version === variant.version)) {
+        throw new VersionNotFoundError(name, variant.version);
+      }
+    }
+
+    record.experiment = {
+      variants: variants.map(({ version, weight }) => ({ version, weight })),
+      startedAt: this.now().toISOString(),
+    };
+    return this.repo.save(record);
+  }
+
+  async clearExperiment(tenantId: string, name: string): Promise<PromptRecord> {
+    const record = await this.get(tenantId, name);
+    if (!record.experiment) return record;
+    delete record.experiment;
+    return this.repo.save(record);
+  }
+
+  /**
+   * Chooses the version to serve and renders it. With a running experiment and a `subjectKey`
+   * (user or conversation id) the assignment is sticky; without a key we cannot be sticky, so we
+   * serve the active version rather than flipping a coin per request.
+   */
+  async resolve(
+    tenantId: string,
+    name: string,
+    input: { variables: Record<string, string>; subjectKey?: string },
+  ): Promise<ResolvedPrompt> {
+    const record = await this.get(tenantId, name);
+
+    let version = record.activeVersion;
+    let inExperiment = false;
+    if (record.experiment && input.subjectKey !== undefined) {
+      // startedAt is part of the key so each new experiment reshuffles who sees which variant.
+      const key = `${tenantId}:${name}:${record.experiment.startedAt}:${input.subjectKey}`;
+      version = pickVariant(
+        key,
+        record.experiment.variants.map((v) => ({ value: v.version, weight: v.weight })),
+      );
+      inExperiment = true;
+    }
+
+    const chosen = record.versions.find((v) => v.version === version);
+    if (!chosen) throw new VersionNotFoundError(name, version ?? 0);
+
+    return {
+      name,
+      version: chosen.version,
+      inExperiment,
+      rendered: renderTemplate(chosen.template, input.variables),
+    };
+  }
+}
+
+export interface ResolvedPrompt {
+  name: string;
+  version: number;
+  /** True when the version came from an A/B split rather than the active pointer. */
+  inExperiment: boolean;
+  rendered: string;
 }
