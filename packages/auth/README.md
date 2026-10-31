@@ -64,6 +64,12 @@ for development only and is never needed by a deployed service.
 
 - **`EntraOboClient`**: exchanges a user's token for a downstream token (on-behalf-of), with a
   bounded cache and shared in-flight requests.
+- **`EntraClientCredentialsClient`**: a service's token for itself (no user), for background work
+  such as the ingestion pipeline writing to search. Cached per target API; the secret comes from the
+  secret store by name.
+- **`startDevTokenEndpoint`**: a local stand-in for Entra's token endpoint serving both the
+  on-behalf-of and client-credentials grants (a client can be given app roles such as `indexer`), so
+  both flows run over real HTTP in tests and demos.
 - **`EnvSecretProvider` / `KeyVaultSecretProvider`**: read credentials from env vars locally or Azure
   Key Vault (managed identity) in Azure, with a short cache so rotation is picked up.
 - **`TestIssuer`**: mints genuinely signed tokens (and attack fixtures: `alg: none`, key confusion,

@@ -74,3 +74,6 @@ Relevance bugs are otherwise guesswork; the "refunding" reranker bug above was f
   token claims, and the on-behalf-of flow makes "the AI only sees what the user may see" end to end.
 - Ingestion and retrieval keep separate in-memory indexes locally. In production both point at the
   same Azure AI Search index; retrieval exposes an index endpoint so it is usable standalone.
+
+> **Update (ADR 0009):** ingestion now writes to retrieval's index through tenant-scoped routes
+> (`/v1/tenants/:tenant/index/documents/:id`, `indexer` role) instead of keeping a separate index.

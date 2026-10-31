@@ -6,33 +6,34 @@ gateway, Entra ID (OIDC/JWT) auth, evaluation gates in CI, OpenTelemetry observa
 deployment.
 
 > **Honest status:** this is built step by step in the open. Five services, two shared libraries
-> and a cross-service end-to-end test are done, and one real path works: **a user with a token asks
+> and a cross-service end-to-end test are done, and one real path works end to end: **a document
+> admin uploads a file, it is ingested and indexed with its access list, and a user with a token asks
 > a question and gets a cited answer, seeing only what their role allows** (run it with
 > `npm run demo -w @genai/e2e`). It all runs on **local stand-ins**: an in-memory queue, index and
 > stores, a deterministic **mock model** (not an LLM), and locally generated signing keys instead of
-> Entra ID. Nothing has been run against real Azure yet, and uploads are not yet wired into search.
+> Entra ID. Nothing has been run against real Azure yet.
 > The diagram below is the **target**, colour-coded by what exists today.
 
 ## Status
 
 ✅ Done · 🚧 In progress · 📋 Planned
 
-| Area                 | Status     | What exists today                                                                                          | Still stubbed or missing                                                 |
-| -------------------- | ---------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| Monorepo, CI, ADRs   | ✅ Done    | npm workspaces, strict TS, lint/format, commit hooks, GitHub Actions                                       | -                                                                        |
-| LLM gateway          | ✅ Done    | Rate limits, token quotas, retries, fallback, error mapping                                                | Azure client untested against real Azure; no cache                       |
-| Prompt registry      | ✅ Done    | Versions, audited rollback, sticky A/B, safe templates                                                     | In-memory storage (no Cosmos DB yet)                                     |
-| Ingestion pipeline   | ✅ Done    | Queue with DLQ, chunking per file type, idempotent indexing                                                | In-memory queue/index; no PDF/Office; 200 KB limit                       |
-| Retrieval service    | ✅ Done    | BM25 + vector, rank fusion, rerank, role/tenant trimming                                                   | Hash embedder (spelling, not meaning); in-memory                         |
-| Auth (Entra ID)      | ✅ Done    | JWT validation, secure-by-default guard, role gates, OBO client                                            | Not run against real Entra ID; OBO and Key Vault not wired yet           |
-| **Vertical slice**   | ✅ Done    | `assistant`: asks as the user, retrieves, uses the registry prompt, verifies citations; e2e over real HTTP | Mock model (deterministic test double); ingestion not wired to retrieval |
-| Guardrails           | 📋 Planned | -                                                                                                          | PII redaction, injection checks, output filtering                        |
-| Agent orchestrator   | 📋 Planned | -                                                                                                          | Tool calling, step limits, human approval                                |
-| MCP gateway          | 📋 Planned | -                                                                                                          | Server registry, permissions, audit log                                  |
-| Cost and performance | 📋 Planned | Per-tenant token quota in the gateway                                                                      | Semantic cache, cost tracking, streaming                                 |
-| Evaluation pipeline  | 📋 Planned | -                                                                                                          | Groundedness/relevance gates that block deploys                          |
-| Observability        | 📋 Planned | -                                                                                                          | OpenTelemetry traces, SLO dashboards, alerts                             |
-| Delivery             | 📋 Planned | -                                                                                                          | Docker, Helm, AKS, canary rollout, Bicep/Terraform                       |
+| Area                 | Status     | What exists today                                                                                                      | Still stubbed or missing                                       |
+| -------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Monorepo, CI, ADRs   | ✅ Done    | npm workspaces, strict TS, lint/format, commit hooks, GitHub Actions                                                   | -                                                              |
+| LLM gateway          | ✅ Done    | Rate limits, token quotas, retries, fallback, error mapping                                                            | Azure client untested against real Azure; no cache             |
+| Prompt registry      | ✅ Done    | Versions, audited rollback, sticky A/B, safe templates                                                                 | In-memory storage (no Cosmos DB yet)                           |
+| Ingestion pipeline   | ✅ Done    | Queue with DLQ, chunking per file type, idempotent; **writes to search with access lists** as its own service identity | In-memory queue; no PDF/Office, no delete; 200 KB limit        |
+| Retrieval service    | ✅ Done    | BM25 + vector, rank fusion, rerank, role/tenant trimming                                                               | Hash embedder (spelling, not meaning); in-memory               |
+| Auth (Entra ID)      | ✅ Done    | JWT validation, secure-by-default guard, role gates, OBO client                                                        | Not run against real Entra ID; OBO and Key Vault not wired yet |
+| **Vertical slice**   | ✅ Done    | Upload, ingest, index, then ask: `assistant` acts as the user, verifies citations; e2e over real HTTP                  | Mock model (deterministic test double); nothing on real Azure  |
+| Guardrails           | 📋 Planned | -                                                                                                                      | PII redaction, injection checks, output filtering              |
+| Agent orchestrator   | 📋 Planned | -                                                                                                                      | Tool calling, step limits, human approval                      |
+| MCP gateway          | 📋 Planned | -                                                                                                                      | Server registry, permissions, audit log                        |
+| Cost and performance | 📋 Planned | Per-tenant token quota in the gateway                                                                                  | Semantic cache, cost tracking, streaming                       |
+| Evaluation pipeline  | 📋 Planned | -                                                                                                                      | Groundedness/relevance gates that block deploys                |
+| Observability        | 📋 Planned | -                                                                                                                      | OpenTelemetry traces, SLO dashboards, alerts                   |
+| Delivery             | 📋 Planned | -                                                                                                                      | Docker, Helm, AKS, canary rollout, Bicep/Terraform             |
 
 ## Architecture (target)
 
@@ -50,7 +51,7 @@ flowchart LR
     AG --> MCP[MCP Gateway]
     AG --> RET
     RET --> AIS[(Azure AI Search)]
-    ING[Ingestion Pipeline] --> AIS
+    ING[Ingestion Pipeline] --> RET
     SB[[Service Bus queue]] --> ING
     GW --> AOAI1[Azure OpenAI primary]
     GW -. fallback .-> AOAI2[Azure OpenAI secondary]
@@ -72,55 +73,66 @@ Everything below was produced by running the code in this repository.
 
 | Package                              | Tests   |
 | ------------------------------------ | ------- |
-| `@genai/assistant`                   | 46      |
+| `@genai/assistant`                   | 41      |
 | `@genai/llm-gateway`                 | 56      |
 | `@genai/prompt-registry`             | 59      |
-| `@genai/ingestion`                   | 59      |
-| `@genai/retrieval`                   | 64      |
-| `@genai/auth`                        | 64      |
-| `@genai/shared`                      | 9       |
-| `@genai/e2e` (all services together) | 13      |
-| **Total**                            | **370** |
+| `@genai/ingestion`                   | 84      |
+| `@genai/retrieval`                   | 71      |
+| `@genai/auth`                        | 70      |
+| `@genai/shared`                      | 17      |
+| `@genai/e2e` (all services together) | 26      |
+| **Total**                            | **424** |
 
 Format check, lint, typecheck and build also pass in CI. Many are end-to-end HTTP tests (failure
-injection, tenant isolation, access trimming, forged and expired tokens, spoofed headers). The 13
-`e2e` tests start the real services on real ports and talk to them over HTTP. To check that test
-can actually fail, access trimming was deliberately broken once: exactly the two security scenarios
-failed, and passed again when restored.
+injection, tenant isolation, access trimming, forged and expired tokens, spoofed headers). The 26
+`e2e` tests start the real services on real ports and talk to them over HTTP. To check those tests
+can actually fail, the code was deliberately broken three ways (access trimming, dropping the access
+list on upload, ignoring access in the "unchanged" check): each breakage was caught by the
+scenarios written for it (the last one by exactly one test), and everything passed again when
+restored.
 
-**A real run** (`npm run -s demo -w @genai/e2e`): the same question from callers with different
-roles, through the assistant, retrieval, the prompt registry and the gateway, using signed tokens.
-The confidential document is restricted to `manager`:
+**A real run** (`npm run -s demo -w @genai/e2e`): documents are uploaded through the ingestion
+service, then the same question is asked by callers with different roles. Abridged:
 
 ```text
-Bob (acme-bank, roles: analyst) asks: "How long do refunds take?"
-  answer:    Refunds take five working days to reach the original card. [1]
-  grounded:  true   sources retrieved: 1
-  citation:  [1] handbook > Refunds  (handbook:0)
+Uploaded through the ingestion service: an open handbook, a manager-only salary
+document, and Globex's handbook (each chunked, then indexed with its access list).
 
 Bob (acme-bank, roles: analyst) asks: "What are the salary bands for managers?"
   answer:    I could not find anything about that in the documents available to you.
-  grounded:  false   sources retrieved: 0
   (no sources the caller may see, so the model was never called)
 
 Alice (acme-bank, roles: manager) asks: "What are the salary bands for managers?"
   answer:    Salary bands for managers start at level M1 and are reviewed every year. [1]
-  grounded:  true   sources retrieved: 1
   citation:  [1] salary-bands > Salary bands  (salary-bands:0)
-
-Gina (globex, roles: analyst) asks: "How long do refunds take?"
-  answer:    Refunds take ten working days at Globex. [1]      <- her own tenant's document
 
 Bob asks the salary question again, sending the spoofed header x-roles: manager
   answer:    I could not find anything about that in the documents available to you.
+
+Bob asks: "What is the hotel limit for business travel?"
+  answer:    I could not find anything about that in the documents available to you.
+
+A document-admin uploads travel-policy.md -> ingestion job succeeded
+
+Bob asks: "What is the hotel limit for business travel?"
+  answer:    The hotel limit for business travel is 150 euros per night. [1]
+  citation:  [1] travel-policy > Business travel  (travel-policy:0)
+
+The same text is re-uploaded, now restricted to managers -> job succeeded
+
+Bob asks: "What is the hotel limit for business travel?"
+  answer:    I could not find anything about that in the documents available to you.
+Alice asks: "What is the hotel limit for business travel?"
+  answer:    The hotel limit for business travel is 150 euros per night. [1]
 
 Alice presents a token issued for the retrieval API to the assistant
   -> HTTP 401 unauthorized (tokens are bound to one service)
 ```
 
 The model here is a deterministic stand-in, so what this proves is the **path and the access
-control**, not answer quality. Bob never sees the salary document, the model is not even called for
-him, and a citation only ever points at a chunk that was really retrieved for that user.
+control**, not answer quality. Bob never sees the restricted documents and the model is not even
+called for him; tightening a document's access takes effect on the next upload even when its text is
+unchanged; and a citation only ever points at a chunk that was really retrieved for that user.
 
 ## Repository layout
 
@@ -178,6 +190,9 @@ building the remaining pieces, so there is always a demonstrable system.
 - [x] **Step 7: Vertical slice.** `assistant` service: asks as the user (on-behalf-of per
       downstream API), retrieves access-trimmed chunks, uses the registry prompt, calls the gateway,
       verifies citations; proven across the real services over HTTP (ADR 0008)
+- [x] **Step 7b: Ingestion to search.** Uploads become answerable: the pipeline writes to the index
+      as its own service identity (client credentials), the access list travels with the upload,
+      the unchanged check covers access, ingestion serves no content (ADR 0009)
 - [ ] **Step 8: Guardrails.** PII redaction, prompt-injection checks, output filtering
 - [ ] **Step 9: Agent orchestrator.** Tool calling, step limits, timeouts, human approval
 - [ ] **Step 10: MCP gateway.** Server registry, permissions, audit logs
