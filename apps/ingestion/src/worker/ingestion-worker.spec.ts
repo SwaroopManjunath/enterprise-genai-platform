@@ -1,4 +1,4 @@
-import { hashContent, type IngestionJob } from '../domain/job';
+import { hashDocument, type IngestionJob } from '../domain/job';
 import { IngestionPipeline } from '../pipeline/ingestion-pipeline';
 import { InMemoryQueue } from '../queue/in-memory-queue';
 import { InMemoryChunkIndex } from '../store/in-memory-chunk-index';
@@ -32,7 +32,8 @@ function setup(pipelineOverride?: (real: IngestionPipeline) => Pick<IngestionPip
       documentId,
       filename,
       content,
-      contentHash: hashContent(content),
+      acl: { allowedRoles: [], tags: [] },
+      contentHash: hashDocument(content, { allowedRoles: [], tags: [] }),
     };
     const now = new Date().toISOString();
     await jobs.create({

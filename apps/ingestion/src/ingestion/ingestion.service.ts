@@ -5,9 +5,9 @@ import {
   DocumentTooLargeError,
   JobNotFoundError,
 } from '../domain/errors';
-import { hashContent, type IngestionJob, type JobRecord } from '../domain/job';
+import { hashDocument, normalizeAcl, type IngestionJob, type JobRecord } from '../domain/job';
 import type { MessageQueue } from '../queue/message-queue';
-import type { ChunkIndex, IndexedChunk, IndexedDocument } from '../store/chunk-index';
+import type { ChunkIndex, IndexedDocument } from '../store/chunk-index';
 import type { JobStore } from '../store/job-store';
 
 export interface SubmitInput {
@@ -15,6 +15,9 @@ export interface SubmitInput {
   filename: string;
   contentType?: string;
   content: string;
+  /** Roles allowed to read the document once searchable; omit for the whole tenant. */
+  allowedRoles?: string[];
+  tags?: string[];
 }
 
 export interface DeadLetterView {
@@ -43,13 +46,15 @@ export class IngestionService {
       throw new DocumentTooLargeError(bytes, this.maxDocumentBytes);
 
     const at = this.now().toISOString();
+    const acl = normalizeAcl(input);
     const job: IngestionJob = {
       jobId: randomUUID(),
       tenantId,
       documentId: input.documentId,
       filename: input.filename,
       content: input.content,
-      contentHash: hashContent(input.content),
+      acl,
+      contentHash: hashDocument(input.content, acl),
       ...(input.contentType !== undefined && { contentType: input.contentType }),
     };
     const record: JobRecord = {
@@ -78,11 +83,6 @@ export class IngestionService {
     const document = await this.index.getDocument(tenantId, documentId);
     if (!document) throw new DocumentNotFoundError(documentId);
     return document;
-  }
-
-  async getChunks(tenantId: string, documentId: string): Promise<IndexedChunk[]> {
-    await this.getDocument(tenantId, documentId);
-    return this.index.getChunks(tenantId, documentId);
   }
 
   async listDeadLetters(tenantId: string): Promise<DeadLetterView[]> {
