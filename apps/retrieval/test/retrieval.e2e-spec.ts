@@ -1,13 +1,19 @@
+import { TOKEN_VERIFIER, TestIssuer } from '@genai/auth';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 
+const issuer = new TestIssuer();
+
 describe('retrieval API', () => {
   let app: INestApplication;
 
   beforeEach(async () => {
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(TOKEN_VERIFIER)
+      .useValue(issuer.verifier())
+      .compile();
     app = moduleRef.createNestApplication();
     await app.init();
   });
@@ -15,21 +21,20 @@ describe('retrieval API', () => {
     await app.close();
   });
 
-  const as = (tenant: string, roles?: string) => {
-    const withHeaders = (r: request.Test) => {
-      r.set('x-tenant-id', tenant);
-      return roles === undefined ? r : r.set('x-roles', roles);
-    };
+  /** A caller authenticated with a signed token carrying exactly these roles. */
+  const as = (tenant: string, roles: string[] = []) => {
+    const bearer = `Bearer ${issuer.mint({ tenant, roles })}`;
     const http = () => request(app.getHttpServer());
     return {
-      put: (path: string, body: object) => withHeaders(http().put(path)).send(body),
-      del: (path: string) => withHeaders(http().delete(path)),
-      search: (body: object) => withHeaders(http().post('/v1/search')).send(body),
+      put: (path: string, body: object) => http().put(path).set('authorization', bearer).send(body),
+      del: (path: string) => http().delete(path).set('authorization', bearer),
+      search: (body: object) => http().post('/v1/search').set('authorization', bearer).send(body),
     };
   };
+  const indexer = (tenant: string) => as(tenant, ['indexer']);
 
   const seed = async () => {
-    const admin = as('acme');
+    const admin = indexer('acme');
     await admin.put('/v1/index/documents/faq', {
       chunks: [
         {
@@ -51,10 +56,13 @@ describe('retrieval API', () => {
     });
   };
 
+  const documentsOf = (res: request.Response): string[] =>
+    res.body.results.map((r: { documentId: string }) => r.documentId);
+
   it('indexes documents and answers a hybrid search with explainable signals', async () => {
     await seed();
 
-    const res = await as('acme', 'analyst')
+    const res = await as('acme', ['analyst'])
       .search({ query: 'how long do refunds take' })
       .expect(200);
 
@@ -72,33 +80,46 @@ describe('retrieval API', () => {
 
   it('hides restricted documents from callers without the role and shows them to those with it', async () => {
     await seed();
+    const query = { query: 'salary bands managers' };
 
-    const analyst = await as('acme', 'analyst')
-      .search({ query: 'salary bands managers' })
-      .expect(200);
-    const manager = await as('acme', 'Manager')
-      .search({ query: 'salary bands managers' })
-      .expect(200);
-    const nobody = await as('acme').search({ query: 'salary bands managers' }).expect(200);
+    const analyst = await as('acme', ['analyst']).search(query).expect(200);
+    const manager = await as('acme', ['Manager']).search(query).expect(200);
+    const nobody = await as('acme').search(query).expect(200);
 
-    expect(analyst.body.results.map((r: { documentId: string }) => r.documentId)).not.toContain(
-      'salary',
-    );
-    expect(nobody.body.results.map((r: { documentId: string }) => r.documentId)).not.toContain(
-      'salary',
-    );
+    expect(documentsOf(analyst)).not.toContain('salary');
+    expect(documentsOf(nobody)).not.toContain('salary');
     expect(manager.body.results[0].documentId).toBe('salary');
+  });
+
+  it('cannot be talked into a wider view: a spoofed x-roles or x-tenant-id header is ignored', async () => {
+    await seed();
+
+    const res = await request(app.getHttpServer())
+      .post('/v1/search')
+      .set('authorization', `Bearer ${issuer.mint({ tenant: 'acme', roles: ['analyst'] })}`)
+      .set('x-roles', 'manager')
+      .send({ query: 'salary bands managers' })
+      .expect(200);
+    expect(documentsOf(res)).not.toContain('salary');
+
+    const otherTenant = await request(app.getHttpServer())
+      .post('/v1/search')
+      .set('authorization', `Bearer ${issuer.mint({ tenant: 'globex', roles: ['manager'] })}`)
+      .set('x-tenant-id', 'acme')
+      .send({ query: 'refunds salary' })
+      .expect(200);
+    expect(otherTenant.body.results).toEqual([]);
   });
 
   it('isolates tenants', async () => {
     await seed();
-    const res = await as('globex', 'manager').search({ query: 'refunds salary' }).expect(200);
+    const res = await as('globex', ['manager']).search({ query: 'refunds salary' }).expect(200);
     expect(res.body.results).toEqual([]);
   });
 
   it('supports keyword and vector modes, filters and topK', async () => {
     await seed();
-    const acme = as('acme', 'manager');
+    const acme = as('acme', ['manager']);
 
     expect((await acme.search({ query: 'refunding', mode: 'keyword' })).body.count).toBe(0);
     expect(
@@ -109,16 +130,14 @@ describe('retrieval API', () => {
       query: 'salary refunds cards',
       filter: { tags: ['support'] },
     });
-    expect(tagged.body.results.every((r: { documentId: string }) => r.documentId === 'faq')).toBe(
-      true,
-    );
+    expect(documentsOf(tagged).every((id) => id === 'faq')).toBe(true);
 
     expect((await acme.search({ query: 'cards refunds', topK: 1 })).body.results).toHaveLength(1);
   });
 
   it('re-indexing replaces a document and removes stale chunks; delete removes it', async () => {
     await seed();
-    const acme = as('acme', 'analyst');
+    const acme = as('acme', ['analyst', 'indexer']);
 
     await acme.put('/v1/index/documents/faq', {
       chunks: [{ index: 0, text: 'Refunds are now instant' }],
@@ -131,8 +150,34 @@ describe('retrieval API', () => {
     expect((await acme.search({ query: 'refunds instant' })).body.results).toEqual([]);
   });
 
+  it('requires the indexer role to change the index, and a valid token for anything', async () => {
+    await seed();
+    const user = as('acme', ['analyst', 'manager']);
+    const chunks = [{ index: 0, text: 'planted content' }];
+
+    expect(
+      (await user.put('/v1/index/documents/planted', { chunks }).expect(403)).body.error.code,
+    ).toBe('forbidden');
+    await user.del('/v1/index/documents/faq').expect(403);
+    // Nothing changed: the document is still searchable and the planted one does not exist.
+    expect(documentsOf(await user.search({ query: 'refunds' }))).toContain('faq');
+    expect(documentsOf(await user.search({ query: 'planted content' }))).not.toContain('planted');
+
+    await request(app.getHttpServer()).post('/v1/search').send({ query: 'refunds' }).expect(401);
+    await request(app.getHttpServer())
+      .post('/v1/search')
+      .set('authorization', `Bearer ${issuer.mint({ tenant: 'acme', expiresInSec: -999 })}`)
+      .send({ query: 'refunds' })
+      .expect(401);
+    await request(app.getHttpServer())
+      .post('/v1/search')
+      .set('authorization', `Bearer ${issuer.mint({ tenant: 'Not A Tenant!' })}`)
+      .send({ query: 'refunds' })
+      .expect(401);
+  });
+
   it('validates input', async () => {
-    const acme = as('acme');
+    const acme = as('acme', ['indexer']);
     const code = async (r: request.Test, status: number) =>
       (await r.expect(status)).body.error.code;
 
@@ -150,7 +195,5 @@ describe('retrieval API', () => {
         400,
       ),
     ).toBe('invalid_request');
-    expect(await code(as('acme', 'bad role!').search({ query: 'x' }), 400)).toBe('invalid_roles');
-    expect(await code(as('Not A Tenant').search({ query: 'x' }), 400)).toBe('invalid_tenant');
   });
 });

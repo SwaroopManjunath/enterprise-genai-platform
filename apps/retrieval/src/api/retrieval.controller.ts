@@ -1,14 +1,16 @@
-import { Body, Controller, Delete, Headers, HttpCode, Param, Post, Put } from '@nestjs/common';
-import { createTenantContext } from '@genai/shared';
+import { CurrentPrincipal, RequireRoles, type AuthenticatedPrincipal } from '@genai/auth';
+import { Body, Controller, Delete, HttpCode, Param, Post, Put } from '@nestjs/common';
 import { DocumentNotFoundError } from '../errors';
 import { IndexingService } from '../index/indexing.service';
 import type { ChunkFilter } from '../index/search-index';
 import { SearchService } from '../search/search.service';
-import { parseRoles, searchSchema, upsertDocumentSchema } from './schemas';
+import { searchSchema, upsertDocumentSchema } from './schemas';
 
-/** Interim identity: tenant and roles come from headers until Step 6 adds validated token claims. */
-const tenantOf = (header: string | undefined): string =>
-  createTenantContext({ tenantId: header ?? '' }).tenantId;
+/**
+ * Writing to the search index is a service-level operation (the ingestion pipeline's app role), not
+ * something an end user does, so it needs its own role.
+ */
+export const INDEXER_ROLE = 'indexer';
 
 @Controller('v1')
 export class RetrievalController {
@@ -18,40 +20,42 @@ export class RetrievalController {
   ) {}
 
   /** Replaces a document's chunks. Idempotent: sending the same body twice leaves the same state. */
+  @RequireRoles(INDEXER_ROLE)
   @Put('index/documents/:documentId')
   upsert(
-    @Headers('x-tenant-id') tenant: string | undefined,
+    @CurrentPrincipal() caller: AuthenticatedPrincipal,
     @Param('documentId') documentId: string,
     @Body() body: unknown,
   ) {
     return this.indexing.upsertDocument(
-      tenantOf(tenant),
+      caller.tenantId,
       documentId,
       upsertDocumentSchema.parse(body),
     );
   }
 
+  @RequireRoles(INDEXER_ROLE)
   @Delete('index/documents/:documentId')
   async remove(
-    @Headers('x-tenant-id') tenant: string | undefined,
+    @CurrentPrincipal() caller: AuthenticatedPrincipal,
     @Param('documentId') documentId: string,
   ) {
-    if (!(await this.indexing.deleteDocument(tenantOf(tenant), documentId))) {
+    if (!(await this.indexing.deleteDocument(caller.tenantId, documentId))) {
       throw new DocumentNotFoundError(documentId);
     }
     return { documentId, deleted: true };
   }
 
+  /**
+   * Access trimming uses the caller's tenant and roles straight from the verified token. A client
+   * can no longer widen its own view by sending a header, which is what makes the trimming real.
+   */
   @Post('search')
   @HttpCode(200)
-  async search(
-    @Headers('x-tenant-id') tenant: string | undefined,
-    @Headers('x-roles') roles: string | undefined,
-    @Body() body: unknown,
-  ) {
+  async search(@CurrentPrincipal() caller: AuthenticatedPrincipal, @Body() body: unknown) {
     const { filter, ...rest } = searchSchema.parse(body);
     const results = await this.searching.search(
-      { tenantId: tenantOf(tenant), roles: parseRoles(roles) },
+      { tenantId: caller.tenantId, roles: caller.roles },
       { ...rest, ...(filter && { filter: filter satisfies ChunkFilter }) },
     );
     return { query: rest.query, mode: rest.mode, count: results.length, results };

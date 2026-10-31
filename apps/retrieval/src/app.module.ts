@@ -1,3 +1,4 @@
+import { authProviders } from '@genai/auth';
 import { Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { RetrievalController } from './api/retrieval.controller';
@@ -46,6 +47,7 @@ import { SearchService } from './search/search.service';
         }),
     },
     { provide: APP_FILTER, useClass: RetrievalExceptionFilter },
+    ...authProviders(),
   ],
 })
 export class AppModule {}
