@@ -1,3 +1,4 @@
+import { authProviders } from '@genai/auth';
 import { Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { INGESTION_CONFIG, loadConfig, type IngestionConfig } from './config/config';
@@ -67,6 +68,7 @@ import { WorkerLoop } from './worker/worker-loop';
         new WorkerLoop(worker, c.pollIntervalMs),
     },
     { provide: APP_FILTER, useClass: IngestionExceptionFilter },
+    ...authProviders(),
   ],
 })
 export class AppModule {}
