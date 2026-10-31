@@ -7,11 +7,23 @@ export interface DevClient {
   secret: string;
   /** The audience this client's own API tokens carry: what an incoming assertion must be for. */
   audience: string;
+  /**
+   * App roles granted to this client's own (app-only) tokens, for the client-credentials grant:
+   * the identity of a service acting as itself, such as `indexer` for the ingestion pipeline.
+   */
+  roles?: string[];
 }
+
+/**
+ * Tenant claim on app-only tokens. A service identity belongs to the platform, not to a customer;
+ * APIs that let a service act for a tenant take that tenant explicitly (and check the service's
+ * role) instead of reading it from the token.
+ */
+export const SERVICE_TENANT = 'platform-services';
 
 export interface DevTokenEndpointOptions {
   issuer: TestIssuer;
-  /** Services allowed to exchange tokens, keyed by client id. */
+  /** Services allowed to obtain tokens, keyed by client id. */
   clients: Record<string, DevClient>;
 }
 
@@ -77,10 +89,11 @@ async function handle(
   if (req.method !== 'POST') return send(res, 405, { error: 'invalid_request' });
 
   const form = new URLSearchParams(await readBody(req));
-  if (
-    form.get('grant_type') !== 'urn:ietf:params:oauth:grant-type:jwt-bearer' ||
-    form.get('requested_token_use') !== 'on_behalf_of'
-  ) {
+  const grant = form.get('grant_type');
+  const isObo =
+    grant === 'urn:ietf:params:oauth:grant-type:jwt-bearer' &&
+    form.get('requested_token_use') === 'on_behalf_of';
+  if (!isObo && grant !== 'client_credentials') {
     return send(res, 400, { error: 'unsupported_grant_type' });
   }
 
@@ -91,6 +104,21 @@ async function handle(
 
   const downstream = SCOPE_PATTERN.exec(form.get('scope') ?? '')?.[1];
   if (!downstream) return send(res, 400, { error: 'invalid_scope' });
+
+  if (!isObo) {
+    // The service acts as itself: no user, just the roles granted to this client.
+    return send(res, 200, {
+      token_type: 'Bearer',
+      expires_in: 3600,
+      access_token: issuer.mint({
+        tenant: SERVICE_TENANT,
+        userId: form.get('client_id') as string,
+        roles: client.roles ?? [],
+        audience: downstream,
+        scopes: [],
+      }),
+    });
+  }
 
   let principal;
   try {
