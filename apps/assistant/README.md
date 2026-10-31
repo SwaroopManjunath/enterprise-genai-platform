@@ -101,7 +101,8 @@ auth settings from [@genai/auth](../../packages/auth/README.md). See
 ## Design
 
 See [ADR 0008](../../docs/adr/0008-assistant-vertical-slice.md), including what this does **not**
-prove (the model here is a deterministic test double; ingestion is not yet wired to retrieval).
+prove (the model here is a deterministic test double). Documents reach search through the ingestion
+service ([ADR 0009](../../docs/adr/0009-ingestion-to-search.md)).
 
 ## Tests
 

@@ -96,3 +96,6 @@ broken and exactly the two security scenarios failed; restored, everything passe
   calls. Latency has not been measured.
 - Single-turn only: no conversation memory, no streaming.
 - Limits are per tenant at the gateway, not per user.
+
+> **Update (ADR 0009):** the first consequence above, that ingestion was not connected to retrieval,
+> is resolved: uploads now reach the search index with their access lists.
