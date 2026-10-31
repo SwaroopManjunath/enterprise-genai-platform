@@ -4,6 +4,8 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { INGESTION_CONFIG, loadConfig } from '../src/config/config';
+import { CHUNK_INDEX } from '../src/store/chunk-index';
+import type { InMemoryChunkIndex } from '../src/store/in-memory-chunk-index';
 import { IngestionWorker } from '../src/worker/ingestion-worker';
 
 const issuer = new TestIssuer();
@@ -33,8 +35,8 @@ describe('ingestion API', () => {
     await app.close();
   });
 
-  /** A caller authenticated with a signed token. Defaults to an ingestion admin of the tenant. */
-  const as = (tenant: string, roles: string[] = ['ingestion-admin']) => {
+  /** A caller authenticated with a signed token. Defaults to a document and ingestion admin. */
+  const as = (tenant: string, roles: string[] = ['document-admin', 'ingestion-admin']) => {
     const bearer = `Bearer ${issuer.mint({ tenant, roles })}`;
     return {
       get: (path: string) => request(app.getHttpServer()).get(path).set('authorization', bearer),
@@ -42,8 +44,9 @@ describe('ingestion API', () => {
         request(app.getHttpServer()).post(path).set('authorization', bearer).send(body),
     };
   };
+  const index = () => app.get<InMemoryChunkIndex>(CHUNK_INDEX);
 
-  it('accepts a document (202), processes it in the background, and exposes the chunks', async () => {
+  it('accepts a document (202), processes it in the background, and indexes the chunks', async () => {
     app = await createApp();
     const acme = as('acme');
 
@@ -59,13 +62,27 @@ describe('ingestion API', () => {
       chunkCount: 2,
     });
     expect((await acme.get('/v1/documents/handbook').expect(200)).body.chunkCount).toBe(2);
-    const chunks = (await acme.get('/v1/documents/handbook/chunks').expect(200)).body.chunks;
-    expect(
-      chunks.map((c: { metadata: { headingPath: string[] } }) => c.metadata.headingPath),
-    ).toEqual([['Pricing'], ['Support']]);
+    const chunks = await index().getChunks('acme', 'handbook');
+    expect(chunks.map((c) => c.metadata.headingPath)).toEqual([['Pricing'], ['Support']]);
   });
 
-  it('is idempotent: resubmitting is unchanged, and an edit replaces stale chunks', async () => {
+  it('carries the access list from the upload to the index, normalised', async () => {
+    app = await createApp();
+    await as('acme').post('/v1/documents', {
+      ...doc,
+      allowedRoles: [' Manager ', 'manager', 'CFO'],
+      tags: ['HR'],
+    });
+
+    await app.get(IngestionWorker).drain();
+
+    expect(await index().getAcl('acme', 'handbook')).toEqual({
+      allowedRoles: ['cfo', 'manager'],
+      tags: ['hr'],
+    });
+  });
+
+  it('is idempotent: resubmitting is unchanged, an edit replaces stale chunks, tighter access is applied', async () => {
     app = await createApp();
     const acme = as('acme');
     const worker = app.get(IngestionWorker);
@@ -79,9 +96,22 @@ describe('ingestion API', () => {
 
     await acme.post('/v1/documents', { ...doc, content: '# Pricing\nNow free.' });
     await worker.drain();
-    const chunks = (await acme.get('/v1/documents/handbook/chunks')).body.chunks;
+    const chunks = await index().getChunks('acme', 'handbook');
     expect(chunks).toHaveLength(1);
-    expect(chunks[0].text).toContain('Now free');
+    expect(chunks[0]?.text).toContain('Now free');
+
+    // Same text, but now restricted: must not be skipped as unchanged.
+    const restricted = await acme
+      .post('/v1/documents', { ...doc, content: '# Pricing\nNow free.', allowedRoles: ['manager'] })
+      .expect(202);
+    await worker.drain();
+    expect((await acme.get(`/v1/ingestions/${restricted.body.jobId}`)).body.status).toBe(
+      'succeeded',
+    );
+    expect(await index().getAcl('acme', 'handbook')).toEqual({
+      allowedRoles: ['manager'],
+      tags: [],
+    });
   });
 
   it('dead-letters an unsupported file, lists it, and can requeue it', async () => {
@@ -129,45 +159,72 @@ describe('ingestion API', () => {
 
     const bad = await acme.post('/v1/documents', { ...doc, documentId: 'has space' }).expect(400);
     expect(bad.body.error.code).toBe('invalid_request');
+    await acme.post('/v1/documents', { ...doc, allowedRoles: 'manager' }).expect(400);
+    await acme.post('/v1/documents', { ...doc, allowedRoles: Array(21).fill('r') }).expect(400);
 
     const big = await acme.post('/v1/documents', { ...doc, content: 'x'.repeat(51) }).expect(413);
     expect(big.body.error).toMatchObject({ code: 'document_too_large', maxBytes: 50 });
   });
 
-  it('requires a valid token, and takes the tenant from it rather than from a header', async () => {
-    app = await createApp();
-    const accepted = await as('acme').post('/v1/documents', doc).expect(202);
+  describe('authentication and authorization', () => {
+    it('requires a valid token, and takes the tenant from it rather than from a header', async () => {
+      app = await createApp();
+      const accepted = await as('acme').post('/v1/documents', doc).expect(202);
 
-    await request(app.getHttpServer()).get('/v1/dead-letters').expect(401);
-    await request(app.getHttpServer())
-      .post('/v1/documents')
-      .set('authorization', `Bearer ${issuer.mint({ tenant: 'acme', expiresInSec: -999 })}`)
-      .send(doc)
-      .expect(401);
-    await request(app.getHttpServer())
-      .post('/v1/documents')
-      .set('authorization', `Bearer ${issuer.mint({ tenant: 'Not A Tenant!' })}`)
-      .send(doc)
-      .expect(401);
+      await request(app.getHttpServer()).get('/v1/dead-letters').expect(401);
+      await request(app.getHttpServer())
+        .post('/v1/documents')
+        .set('authorization', `Bearer ${issuer.mint({ tenant: 'acme', expiresInSec: -999 })}`)
+        .send(doc)
+        .expect(401);
+      await request(app.getHttpServer())
+        .post('/v1/documents')
+        .set('authorization', `Bearer ${issuer.mint({ tenant: 'Not A Tenant!' })}`)
+        .send(doc)
+        .expect(401);
 
-    // Spoof attempt: globex's token plus an x-tenant-id naming acme still cannot see acme's job.
-    await request(app.getHttpServer())
-      .get(`/v1/ingestions/${accepted.body.jobId}`)
-      .set('authorization', `Bearer ${issuer.mint({ tenant: 'globex' })}`)
-      .set('x-tenant-id', 'acme')
-      .expect(404);
-  });
+      // Spoof attempt: globex's token plus an x-tenant-id naming acme still cannot see acme's job.
+      await request(app.getHttpServer())
+        .get(`/v1/ingestions/${accepted.body.jobId}`)
+        .set(
+          'authorization',
+          `Bearer ${issuer.mint({ tenant: 'globex', roles: ['document-admin'] })}`,
+        )
+        .set('x-tenant-id', 'acme')
+        .expect(404);
+    });
 
-  it('lets members submit and read their jobs, but only ingestion-admins see dead letters', async () => {
-    app = await createApp();
-    const member = as('acme', ['analyst']);
-    const accepted = await member.post('/v1/documents', doc).expect(202);
-    await app.get(IngestionWorker).drain();
+    it('lets only document-admins upload or inspect uploads: ordinary members get 403', async () => {
+      app = await createApp();
+      const accepted = await as('acme').post('/v1/documents', doc).expect(202);
+      const member = as('acme', ['analyst', 'manager']);
 
-    await member.get(`/v1/ingestions/${accepted.body.jobId}`).expect(200);
-    await member.get('/v1/documents/handbook').expect(200);
-    expect((await member.get('/v1/dead-letters').expect(403)).body.error.code).toBe('forbidden');
-    await member.post(`/v1/dead-letters/${accepted.body.jobId}/requeue`).expect(403);
+      expect((await member.post('/v1/documents', doc).expect(403)).body.error.code).toBe(
+        'forbidden',
+      );
+      await member.get(`/v1/ingestions/${accepted.body.jobId}`).expect(403);
+      await member.get('/v1/documents/handbook').expect(403);
+    });
+
+    it('keeps dead-letter operations to ingestion-admins, separate from document-admins', async () => {
+      app = await createApp();
+      const uploader = as('acme', ['document-admin']);
+
+      await uploader.post('/v1/documents', doc).expect(202);
+      await uploader.get('/v1/dead-letters').expect(403);
+      await uploader.post('/v1/dead-letters/some-job/requeue').expect(403);
+    });
+
+    it('has no endpoint that returns document content: only retrieval serves it, trimmed by role', async () => {
+      app = await createApp();
+      const admin = as('acme');
+      await admin.post('/v1/documents', { ...doc, allowedRoles: ['manager'] });
+      await app.get(IngestionWorker).drain();
+
+      await admin.get('/v1/documents/handbook/chunks').expect(404);
+      const info = (await admin.get('/v1/documents/handbook').expect(200)).body;
+      expect(JSON.stringify(info)).not.toContain('Plans start');
+    });
   });
 
   it('processes documents automatically when the background poller is enabled', async () => {

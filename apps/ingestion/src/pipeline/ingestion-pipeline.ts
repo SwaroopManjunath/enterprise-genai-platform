@@ -42,6 +42,7 @@ export class IngestionPipeline {
         text: c.text,
         metadata: c.metadata,
       })),
+      job.acl,
     );
     return { outcome: 'indexed', chunkCount: chunks.length };
   }

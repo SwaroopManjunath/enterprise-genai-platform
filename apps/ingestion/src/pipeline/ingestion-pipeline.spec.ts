@@ -1,18 +1,25 @@
 import { EmptyDocumentError, UnsupportedFileTypeError } from '../domain/errors';
-import { hashContent, type IngestionJob } from '../domain/job';
+import { hashDocument, normalizeAcl, type DocumentAcl, type IngestionJob } from '../domain/job';
 import { InMemoryChunkIndex } from '../store/in-memory-chunk-index';
 import { IngestionPipeline } from './ingestion-pipeline';
 
 const chunking = { maxChars: 60, overlapChars: 0 };
 
-function job(content: string, overrides: Partial<IngestionJob> = {}): IngestionJob {
+const open: DocumentAcl = { allowedRoles: [], tags: [] };
+
+function job(
+  content: string,
+  overrides: Partial<IngestionJob> & { acl?: DocumentAcl } = {},
+): IngestionJob {
+  const acl = overrides.acl ?? open;
   return {
     jobId: 'job-1',
     tenantId: 'acme',
     documentId: 'handbook',
     filename: 'handbook.md',
     content,
-    contentHash: hashContent(content),
+    acl,
+    contentHash: hashDocument(content, acl),
     ...overrides,
   };
 }
@@ -97,5 +104,33 @@ describe('IngestionPipeline', () => {
     await expect(pipeline.run(job('   \n ', { filename: 'blank.txt' }))).rejects.toBeInstanceOf(
       EmptyDocumentError,
     );
+  });
+
+  it('hands the access list to the index along with the chunks', async () => {
+    const index = new InMemoryChunkIndex();
+    const pipeline = new IngestionPipeline(index, chunking);
+    const acl = normalizeAcl({ allowedRoles: ['Manager'], tags: ['HR'] });
+
+    await pipeline.run(job('# A\nconfidential.', { acl }));
+
+    expect(await index.getAcl('acme', 'handbook')).toEqual({
+      allowedRoles: ['manager'],
+      tags: ['hr'],
+    });
+  });
+
+  it('does not skip a re-upload of identical text with a tighter access list', async () => {
+    const index = new InMemoryChunkIndex();
+    const pipeline = new IngestionPipeline(index, chunking);
+    const text = '# A\nsome policy text.';
+
+    await pipeline.run(job(text, { acl: open }));
+    const tightened = await pipeline.run(
+      job(text, { acl: normalizeAcl({ allowedRoles: ['manager'] }) }),
+    );
+
+    // Same words, different audience: it must be applied, not skipped as "unchanged".
+    expect(tightened.outcome).toBe('indexed');
+    expect(await index.getAcl('acme', 'handbook')).toEqual({ allowedRoles: ['manager'], tags: [] });
   });
 });

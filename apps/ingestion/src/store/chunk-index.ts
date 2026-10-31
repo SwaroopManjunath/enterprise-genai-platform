@@ -1,4 +1,5 @@
 import type { ChunkMetadata } from '../chunking/types';
+import type { DocumentAcl } from '../domain/job';
 
 export interface IndexedChunk {
   /** Deterministic: `${documentId}:${index}`, so re-indexing overwrites instead of duplicating. */
@@ -20,7 +21,9 @@ export function chunkId(documentId: string, index: number): string {
 }
 
 /**
- * Where chunks end up (Azure AI Search in production, with embeddings added in Step 5).
+ * Where chunks end up: the retrieval service's search index in production, an in-memory stand-in
+ * for development and tests. The port deliberately has no way to read chunks back: only retrieval
+ * serves content, and it does so after trimming by the caller's tenant and roles.
  *
  * `replaceDocument` is the idempotency primitive: it makes the stored chunks for a document equal
  * exactly the given set, removing any stale chunks left from an older, longer version. Calling it
@@ -33,8 +36,8 @@ export interface ChunkIndex {
     documentId: string,
     contentHash: string,
     chunks: IndexedChunk[],
+    acl: DocumentAcl,
   ): Promise<void>;
-  getChunks(tenantId: string, documentId: string): Promise<IndexedChunk[]>;
 }
 
 export const CHUNK_INDEX = Symbol('CHUNK_INDEX');

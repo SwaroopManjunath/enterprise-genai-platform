@@ -1,8 +1,10 @@
+import type { DocumentAcl } from '../domain/job';
 import type { ChunkIndex, IndexedChunk, IndexedDocument } from './chunk-index';
 
 interface Stored {
   document: IndexedDocument;
   chunks: IndexedChunk[];
+  acl: DocumentAcl;
 }
 
 /** Keyed by tenant then document, so tenants can never see or overwrite each other's chunks. */
@@ -21,6 +23,7 @@ export class InMemoryChunkIndex implements ChunkIndex {
     documentId: string,
     contentHash: string,
     chunks: IndexedChunk[],
+    acl: DocumentAcl,
   ): Promise<void> {
     const tenant = this.byTenant.get(tenantId) ?? new Map<string, Stored>();
     // One assignment swaps the whole document, so readers never see a half-old, half-new mix.
@@ -32,13 +35,20 @@ export class InMemoryChunkIndex implements ChunkIndex {
         indexedAt: this.now().toISOString(),
       },
       chunks: structuredClone(chunks),
+      acl: structuredClone(acl),
     });
     this.byTenant.set(tenantId, tenant);
     return Promise.resolve();
   }
 
+  /** Inspection helpers for tests and local development; not part of the ChunkIndex port. */
   getChunks(tenantId: string, documentId: string): Promise<IndexedChunk[]> {
     const stored = this.byTenant.get(tenantId)?.get(documentId);
     return Promise.resolve(structuredClone(stored?.chunks ?? []));
+  }
+
+  getAcl(tenantId: string, documentId: string): Promise<DocumentAcl | undefined> {
+    const stored = this.byTenant.get(tenantId)?.get(documentId);
+    return Promise.resolve(stored && structuredClone(stored.acl));
   }
 }
