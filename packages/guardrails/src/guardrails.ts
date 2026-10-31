@@ -79,7 +79,7 @@ export interface OutputContext {
  * the user asks, what the documents say, and what the model answers.
  */
 export class Guardrails {
-  private readonly mode: GuardrailMode;
+  readonly mode: GuardrailMode;
   private readonly outputPii: readonly PiiType[];
   private readonly questionThreshold: number;
   private readonly sourceThreshold: number;

@@ -1,4 +1,13 @@
+import { randomBytes } from 'node:crypto';
 import type { AuthenticatedPrincipal, OboTokenClient } from '@genai/auth';
+import {
+  BLOCKED_ANSWER,
+  type GuardrailMode,
+  type Guardrails,
+  type OutputReport,
+  type QuestionReport,
+  type SourcesReport,
+} from '@genai/guardrails';
 import { DownstreamError } from '@genai/shared';
 import { Logger } from '@nestjs/common';
 import type { AssistantConfig } from '../config/config';
@@ -9,6 +18,7 @@ import type {
   SearchRequest,
 } from '../clients/service-clients';
 import { checkCitations, type Citation } from './citations';
+import { GuardrailBlockedError } from './errors';
 import { BUILTIN_PROMPT_TEMPLATE, fillTemplate } from './prompt';
 import { formatSources, toSources } from './sources';
 
@@ -25,6 +35,15 @@ export interface PromptInfo {
   source: 'registry' | 'builtin';
 }
 
+/** What the guardrails saw and did. Kinds, counts and signal names only, never the text itself. */
+export interface GuardrailsReport {
+  mode: GuardrailMode;
+  question: QuestionReport;
+  sources: SourcesReport;
+  /** Absent when no answer was generated (nothing permitted to retrieve). */
+  output?: OutputReport;
+}
+
 export interface AskResult {
   requestId: string;
   answer: string;
@@ -37,6 +56,7 @@ export interface AskResult {
   usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
   model?: { provider: string; fallbackUsed: boolean };
   prompt?: PromptInfo;
+  guardrails: GuardrailsReport;
 }
 
 export const NO_SOURCES_ANSWER =
@@ -50,13 +70,20 @@ type Clients = {
 };
 
 /**
- * Answers a question **as the calling user**, in four steps:
+ * Answers a question **as the calling user**, in four steps (with guardrails at each boundary where
+ * untrusted text crosses: the question in, the documents in, the answer out):
  *
  *  1. Retrieve: exchange the user's token for a retrieval token (on-behalf-of) and search. Access
  *     trimming happens there, by the user's tenant and roles, so only permitted chunks come back.
  *  2. Prompt: resolve the tenant's prompt from the registry (or use the built-in default).
  *  3. Generate: call the LLM gateway, again as the user, for limits, retries and fallback.
  *  4. Verify: keep only citations that point at chunks that were really retrieved.
+ *
+ * Guardrails: a question that looks like an attack is refused and sensitive data in it is masked
+ * before it reaches search or the model; a retrieved passage that reads like an instruction is
+ * quarantined (a document has no authority to instruct the assistant); a per-request canary in the
+ * confidential prompt exposes a model that repeats its instructions; and the answer is redacted
+ * and stripped of image/HTML exfiltration before the user sees it.
  *
  * If nothing is retrieved the model is never called: it cannot hallucinate from nothing, the call
  * costs nothing, and the reply does not reveal whether a restricted document exists.
@@ -70,6 +97,7 @@ export class AskService {
       AssistantConfig,
       'gateway' | 'prompts' | 'retrieval' | 'promptName' | 'defaultTopK'
     >,
+    private readonly guardrails: Guardrails,
   ) {}
 
   async ask(
@@ -78,18 +106,27 @@ export class AskService {
     requestId: string,
   ): Promise<AskResult> {
     const { retrieval, gateway, obo } = this.clients;
+    const guardrails = this.guardrails;
+
+    // 1. The question in: refuse an attack, mask sensitive data before it travels any further.
+    const question = guardrails.checkQuestion(input.question);
+    if (question.blocked) throw new GuardrailBlockedError(question.report);
 
     const hits = await retrieval.search(
       await obo.exchange(caller.accessToken, this.config.retrieval.scope),
       {
-        query: input.question,
+        query: question.text,
         topK: input.topK ?? this.config.defaultTopK,
         ...(input.filter && { filter: input.filter }),
       },
       requestId,
     );
 
-    if (hits.length === 0) {
+    // 2. The documents in: a passage that reads like an instruction never reaches the prompt.
+    const screened = guardrails.screenSources(hits);
+    const sources = toSources(screened.kept);
+
+    if (sources.length === 0) {
       return {
         requestId,
         answer: NO_SOURCES_ANSWER,
@@ -97,36 +134,72 @@ export class AskService {
         grounded: false,
         sourcesRetrieved: 0,
         droppedCitations: [],
+        guardrails: { mode: guardrails.mode, question: question.report, sources: screened.report },
       };
     }
 
-    const sources = toSources(hits);
+    const sourcesText = formatSources(sources);
     const { rendered, info } = await this.resolvePrompt(
       caller,
-      { sources: formatSources(sources), question: input.question },
+      { sources: sourcesText, question: question.text },
       requestId,
     );
+
+    // A random marker in the confidential part of the prompt: it has no reason to ever appear in an
+    // answer, so seeing it proves the model repeated its hidden instructions.
+    const canary = `cnry-${randomBytes(8).toString('hex')}`;
+    const system = `${rendered}\n\nConfidential marker (never output it): ${canary}`;
 
     const completion = await gateway.chat(
       await obo.exchange(caller.accessToken, this.config.gateway.scope),
       [
-        { role: 'system', content: rendered },
-        { role: 'user', content: input.question },
+        { role: 'system', content: system },
+        { role: 'user', content: question.text },
       ],
       requestId,
     );
 
-    const checked = checkCitations(completion.message.content, sources);
-    return {
+    // 3. The answer out: block a leak, redact sensitive data, strip image and HTML exfiltration.
+    const instructionText = rendered.split(sourcesText).join('').split(question.text).join('');
+    const output = guardrails.checkOutput(completion.message.content, {
+      canary,
+      instructionText: `${instructionText}\n${system.slice(rendered.length)}`,
+    });
+
+    const common = {
       requestId,
-      answer: checked.answer,
-      citations: checked.citations,
-      grounded: checked.citations.length > 0,
       sourcesRetrieved: sources.length,
-      droppedCitations: checked.droppedMarkers,
       usage: completion.usage,
       model: { provider: completion.provider, fallbackUsed: completion.fallbackUsed },
       prompt: info,
+      guardrails: {
+        mode: guardrails.mode,
+        question: question.report,
+        sources: screened.report,
+        output: output.report,
+      },
+    };
+
+    if (output.blocked) {
+      return {
+        ...common,
+        answer: BLOCKED_ANSWER,
+        citations: [],
+        grounded: false,
+        droppedCitations: [],
+      };
+    }
+
+    const checked = checkCitations(output.text, sources);
+    return {
+      ...common,
+      answer: checked.answer,
+      citations: checked.citations.map((c) => ({
+        ...c,
+        excerpt: guardrails.redactForOutput(c.excerpt),
+      })),
+      grounded: checked.citations.length > 0,
+      droppedCitations: checked.droppedMarkers,
     };
   }
 
