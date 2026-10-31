@@ -1,4 +1,6 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createLocalJWKSet } from 'jose';
@@ -196,5 +198,74 @@ describe('createTokenVerifier and loadAuthConfig', () => {
       tenantClaim: 'tid',
       clockToleranceSec: 30,
     });
+  });
+});
+
+describe('remote key set (what production uses)', () => {
+  let server: Server;
+  let url: string;
+  let published: Record<string, unknown>[] = [];
+
+  beforeAll(async () => {
+    server = createServer((_req, res) => {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ keys: published }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/keys`;
+  });
+  afterAll(async () => {
+    await new Promise((resolve) => server.close(resolve));
+  });
+
+  const verifierFor = () =>
+    createTokenVerifier(
+      loadAuthConfig({
+        AUTH_ISSUER: issuer.issuer,
+        AUTH_AUDIENCE: issuer.audience,
+        AUTH_JWKS_URL: url,
+      }),
+      { jwksCooldownMs: 0 },
+    );
+
+  it('fetches the published keys over HTTP and verifies a token against them', async () => {
+    published = issuer.jwks().keys;
+    expect((await verifierFor().verify(issuer.mint({ tenant: 'acme' }))).tenantId).toBe('acme');
+  });
+
+  it('picks up a rotated signing key without a restart, and still rejects unknown keys', async () => {
+    const rotated = new TestIssuer(issuer.issuer, issuer.audience, undefined, 'key-b');
+    published = issuer.jwks().keys; // only the old key is published so far
+    const verifier = verifierFor();
+
+    expect((await verifier.verify(issuer.mint({ tenant: 'acme' }))).tenantId).toBe('acme');
+    await expect(verifier.verify(rotated.mint({ tenant: 'acme' }))).rejects.toMatchObject({
+      reason: 'invalid_signature',
+    });
+
+    published = [...issuer.jwks().keys, ...rotated.jwks().keys]; // the provider rotates keys
+    expect((await verifier.verify(rotated.mint({ tenant: 'acme' }))).tenantId).toBe('acme');
+    expect((await verifier.verify(issuer.mint({ tenant: 'acme' }))).tenantId).toBe('acme');
+  });
+
+  it('rejects a forged token even when the key id matches a published key', async () => {
+    published = issuer.jwks().keys;
+    await expect(
+      verifierFor().verify(issuer.forge.otherKey({ tenant: 'acme' })),
+    ).rejects.toMatchObject({ reason: 'invalid_signature' });
+  });
+
+  it('fails closed (rejects) when the key endpoint is unreachable', async () => {
+    const down = createTokenVerifier(
+      loadAuthConfig({
+        AUTH_ISSUER: issuer.issuer,
+        AUTH_AUDIENCE: issuer.audience,
+        AUTH_JWKS_URL: 'http://127.0.0.1:1/keys',
+      }),
+      { jwksCooldownMs: 0 },
+    );
+    await expect(down.verify(issuer.mint({ tenant: 'acme' }))).rejects.toBeInstanceOf(
+      AuthenticationError,
+    );
   });
 });
