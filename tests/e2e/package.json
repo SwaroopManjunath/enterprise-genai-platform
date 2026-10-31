@@ -1,0 +1,25 @@
+{
+  "name": "@genai/e2e",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Starts the real services together and exercises the login-to-cited-answer path over HTTP.",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "jest",
+    "demo": "ts-node src/demo.ts"
+  },
+  "dependencies": {
+    "@genai/auth": "0.1.0",
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/platform-express": "^11.0.0",
+    "@nestjs/testing": "^11.0.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@genai/shared": "0.1.0",
+    "ts-node": "^10.9.2"
+  }
+}
