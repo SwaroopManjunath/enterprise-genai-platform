@@ -12,9 +12,9 @@
     "tests/*"
   ],
   "scripts": {
-    "build": "npm run build -w @genai/shared && npm run build -w @genai/auth && npm run build --workspaces --if-present",
-    "test": "npm run build -w @genai/shared && npm run build -w @genai/auth && npm run test --workspaces --if-present",
-    "typecheck": "npm run build -w @genai/shared && npm run build -w @genai/auth && npm run typecheck --workspaces --if-present",
+    "build": "npm run build -w @genai/shared && npm run build -w @genai/auth && npm run build -w @genai/guardrails && npm run build --workspaces --if-present",
+    "test": "npm run build -w @genai/shared && npm run build -w @genai/auth && npm run build -w @genai/guardrails && npm run test --workspaces --if-present",
+    "typecheck": "npm run build -w @genai/shared && npm run build -w @genai/auth && npm run build -w @genai/guardrails && npm run typecheck --workspaces --if-present",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
