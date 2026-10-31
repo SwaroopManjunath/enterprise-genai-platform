@@ -11,6 +11,7 @@ what it costs us. They are immutable once accepted; a later ADR can supersede an
 | [0004](0004-prompt-registry-design.md)               | Prompt registry design               | Accepted |
 | [0005](0005-queue-driven-ingestion.md)               | Queue-driven ingestion               | Accepted |
 | [0006](0006-hybrid-retrieval-and-access-trimming.md) | Hybrid retrieval and access trimming | Accepted |
+| [0007](0007-authentication-and-authorization.md)     | Authentication and authorization     | Accepted |
 
 New ADR: copy the structure of an existing one, take the next number, and add it to this table in
 the same PR as the change it justifies.
