@@ -7,3 +7,4 @@ export * from './secrets';
 export * from './obo/obo-client';
 export * from './dev-keys';
 export * from './dev-token-endpoint';
+export * from './app-token/client-credentials-client';
