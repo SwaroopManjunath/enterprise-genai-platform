@@ -46,9 +46,10 @@ async function main(): Promise<void> {
   const stack = await startStack();
   try {
     await seedDocuments(stack);
-    console.log('Services started: retrieval, prompt registry, gateway, assistant + OBO endpoint.');
+    console.log('Services started: ingestion, retrieval, prompt registry, gateway, assistant.');
+    console.log('Uploaded through the ingestion service: an open handbook, a manager-only salary');
     console.log(
-      "Documents: an open handbook, a manager-only salary document, and Globex's handbook.",
+      "document, and Globex's handbook (each chunked, then indexed with its access list).",
     );
 
     const refunds = 'How long do refunds take?';
@@ -62,6 +63,27 @@ async function main(): Promise<void> {
       headers: { 'x-roles': 'manager' },
       body: { roles: ['manager'] },
     });
+
+    const travelQuestion = 'What is the hotel limit for business travel?';
+    const travel = {
+      documentId: 'travel-policy',
+      filename: 'travel-policy.md',
+      content: '# Business travel\nThe hotel limit for business travel is 150 euros per night.',
+    };
+    await show(stack, 'Bob', bob, travelQuestion);
+    const uploaded = await stack.uploadAndWait('acme-bank', travel);
+    console.log(`\nA document-admin uploads travel-policy.md -> ingestion job ${uploaded.status}`);
+    await show(stack, 'Bob', bob, travelQuestion);
+
+    const tightened = await stack.uploadAndWait('acme-bank', {
+      ...travel,
+      allowedRoles: ['manager'],
+    });
+    console.log(
+      `\nThe same text is re-uploaded, now restricted to managers -> job ${tightened.status}`,
+    );
+    await show(stack, 'Bob', bob, travelQuestion);
+    await show(stack, 'Alice', alice, travelQuestion);
 
     const wrong = await stack.call('POST', 'assistant', '/v1/ask', {
       token: stack.token('retrieval', alice),
