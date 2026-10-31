@@ -10,6 +10,13 @@ export default tseslint.config(
   ...tseslint.configs.recommended,
   prettier,
   {
+    // NestJS dependency injection reads constructor types at runtime (emitDecoratorMetadata),
+    // so those imports must stay value imports; this makes the type-import rule aware of that.
+    languageOptions: {
+      parserOptions: { emitDecoratorMetadata: true, experimentalDecorators: true },
+    },
+  },
+  {
     files: ['**/*.cjs'],
     languageOptions: { sourceType: 'commonjs', globals: { module: 'writable' } },
   },
