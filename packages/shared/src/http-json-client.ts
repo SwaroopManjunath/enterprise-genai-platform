@@ -24,9 +24,11 @@ export interface HttpJsonClientOptions {
   fetchImpl?: typeof fetch;
 }
 
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
+
 /**
- * Minimal JSON-over-HTTP client for calling our own services. Every call is bounded by a timeout so
- * a slow dependency cannot hold a user request open, and failures are normalised into
+ * Minimal JSON-over-HTTP client for calling our own services. Every call is bounded by a timeout
+ * so a slow dependency cannot hold a request open, and failures are normalised into
  * DownstreamError. The bearer token is only ever sent as a header, never put in a URL or message.
  */
 export class HttpJsonClient {
@@ -36,10 +38,32 @@ export class HttpJsonClient {
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
-  async post<T>(
+  get<T>(path: string, token: string, headers?: Record<string, string>): Promise<T> {
+    return this.request<T>('GET', path, token, undefined, headers);
+  }
+
+  post<T>(
     path: string,
     token: string,
     body: unknown,
+    headers?: Record<string, string>,
+  ): Promise<T> {
+    return this.request<T>('POST', path, token, body, headers);
+  }
+
+  put<T>(path: string, token: string, body: unknown, headers?: Record<string, string>): Promise<T> {
+    return this.request<T>('PUT', path, token, body, headers);
+  }
+
+  delete<T>(path: string, token: string, headers?: Record<string, string>): Promise<T> {
+    return this.request<T>('DELETE', path, token, undefined, headers);
+  }
+
+  async request<T>(
+    method: HttpMethod,
+    path: string,
+    token: string,
+    body?: unknown,
     headers: Record<string, string> = {},
   ): Promise<T> {
     const { service, baseUrl, timeoutMs } = this.options;
@@ -47,13 +71,13 @@ export class HttpJsonClient {
     let response: Response;
     try {
       response = await this.fetchImpl(`${baseUrl.replace(/\/+$/, '')}${path}`, {
-        method: 'POST',
+        method,
         headers: {
           'content-type': 'application/json',
           authorization: `Bearer ${token}`,
           ...headers,
         },
-        body: JSON.stringify(body),
+        ...(body !== undefined && { body: JSON.stringify(body) }),
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (error) {
