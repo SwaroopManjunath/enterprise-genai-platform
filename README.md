@@ -47,7 +47,8 @@ npm run lint && npm run typecheck && npm test
 
 Try the services locally with no cloud account: see
 [apps/llm-gateway](apps/llm-gateway/README.md#run-it-locally-no-cloud-account-needed) and
-[apps/prompt-registry](apps/prompt-registry/README.md#run-it-locally).
+[apps/prompt-registry](apps/prompt-registry/README.md#run-it-locally) and
+[apps/ingestion](apps/ingestion/README.md#run-it-locally).
 
 ## Roadmap
 
@@ -57,7 +58,8 @@ Try the services locally with no cloud account: see
       backoff, fallback deployment, error classification (ADR 0003)
 - [x] **Step 3: Prompt registry.** Append-only versions, audited rollback, sticky A/B
       experiments, safe templates (ADR 0004)
-- [ ] **Step 4: Ingestion pipeline.** Queue-driven, per-file-type chunking, idempotent, DLQ
+- [x] **Step 4: Ingestion pipeline.** Queue-driven with peek-lock semantics, per-file-type
+      chunking, idempotent re-indexing, retries with backoff, dead-letter queue (ADR 0005)
 - [ ] **Step 5: Retrieval service.** Hybrid search, reranking, per-tenant/per-role filters
 - [ ] **Step 6: Auth.** Entra ID OIDC, JWT validation, on-behalf-of flow, Key Vault
 - [ ] **Step 7: Guardrails.** PII redaction, prompt-injection checks, output filtering

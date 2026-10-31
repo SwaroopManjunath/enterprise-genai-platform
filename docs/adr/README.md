@@ -9,6 +9,7 @@ what it costs us. They are immutable once accepted; a later ADR can supersede an
 | [0002](0002-monorepo-with-npm-workspaces.md)  | Monorepo with npm workspaces  | Accepted |
 | [0003](0003-gateway-resilience-and-limits.md) | Gateway resilience and limits | Accepted |
 | [0004](0004-prompt-registry-design.md)        | Prompt registry design        | Accepted |
+| [0005](0005-queue-driven-ingestion.md)        | Queue-driven ingestion        | Accepted |
 
 New ADR: copy the structure of an existing one, take the next number, and add it to this table in
 the same PR as the change it justifies.
