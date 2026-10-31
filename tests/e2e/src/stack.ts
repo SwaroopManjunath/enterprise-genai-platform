@@ -11,6 +11,11 @@ import type { INestApplication, Type } from '@nestjs/common';
 import { Test, type TestingModuleBuilder } from '@nestjs/testing';
 import { AppModule as AssistantModule } from '../../../apps/assistant/src/app.module';
 import { ASSISTANT_CONFIG, loadConfig } from '../../../apps/assistant/src/config/config';
+import { AppModule as IngestionModule } from '../../../apps/ingestion/src/app.module';
+import {
+  INGESTION_CONFIG,
+  loadConfig as loadIngestionConfig,
+} from '../../../apps/ingestion/src/config/config';
 import { AppModule as GatewayModule } from '../../../apps/llm-gateway/src/app.module';
 import { GroundedMockProvider } from '../../../apps/llm-gateway/src/llm/grounded-mock.provider';
 import { LLM_PROVIDERS } from '../../../apps/llm-gateway/src/llm/types';
@@ -23,6 +28,7 @@ export const AUDIENCE = {
   retrieval: 'api://retrieval',
   gateway: 'api://gateway',
   prompts: 'api://prompt-registry',
+  ingestion: 'api://ingestion',
 } as const;
 
 export type Service = keyof typeof AUDIENCE;
@@ -146,6 +152,49 @@ export class Stack {
     return created.body.version as number;
   }
 
+  /** Upload a document through the ingestion service, as a document admin of the tenant. */
+  upload(
+    tenant: string,
+    document: {
+      documentId: string;
+      filename: string;
+      content: string;
+      allowedRoles?: string[];
+      tags?: string[];
+    },
+    roles: string[] = ['document-admin'],
+  ): Promise<HttpResult> {
+    return this.call('POST', 'ingestion', '/v1/documents', {
+      token: this.token('ingestion', { tenant, userId: 'uploader', roles }),
+      body: document,
+    });
+  }
+
+  /** Polls an ingestion job until it reaches a final state. */
+  async waitForJob(tenant: string, jobId: string, timeoutMs = 5000): Promise<string> {
+    const token = this.token('ingestion', { tenant, roles: ['document-admin'] });
+    const deadline = Date.now() + timeoutMs;
+    let status = 'queued';
+    while (Date.now() < deadline) {
+      status = (await this.call('GET', 'ingestion', `/v1/ingestions/${jobId}`, { token })).body
+        .status;
+      if (['succeeded', 'unchanged', 'failed'].includes(status)) return status;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error(`job ${jobId} did not finish (last status: ${status})`);
+  }
+
+  /** Upload, then wait until the document is searchable (or the job fails). Returns the status. */
+  async uploadAndWait(
+    tenant: string,
+    document: Parameters<Stack['upload']>[1],
+  ): Promise<{ jobId: string; status: string }> {
+    const accepted = await this.upload(tenant, document);
+    if (accepted.status !== 202) throw new Error(`upload refused: ${accepted.status}`);
+    const jobId = accepted.body.jobId as string;
+    return { jobId, status: await this.waitForJob(tenant, jobId) };
+  }
+
   /** Stops one service, to rehearse an outage. */
   stopService(service: Service): Promise<void> {
     return this.apps[service].close();
@@ -185,7 +234,15 @@ export async function startStack(): Promise<Stack> {
   // Stand-in for Entra's on-behalf-of endpoint, so the real OBO client runs over real HTTP.
   const obo = await startDevTokenEndpoint({
     issuer,
-    clients: { assistant: { secret: 'dev-secret', audience: AUDIENCE.assistant } },
+    clients: {
+      assistant: { secret: 'dev-secret', audience: AUDIENCE.assistant },
+      // The ingestion pipeline's own identity: it holds the `indexer` role and no user.
+      'ingestion-app': {
+        secret: 'ingestion-secret',
+        audience: AUDIENCE.ingestion,
+        roles: ['indexer'],
+      },
+    },
   });
 
   const assistant = await start(AssistantModule, AUDIENCE.assistant, issuer, (b) =>
@@ -204,9 +261,30 @@ export async function startStack(): Promise<Stack> {
       .useValue(new EnvSecretProvider({ SECRET_ASSISTANT_CLIENT_SECRET: 'dev-secret' })),
   );
 
+  // Real background worker (polling), writing to the real retrieval service as its own identity.
+  const ingestion = await start(IngestionModule, AUDIENCE.ingestion, issuer, (b) =>
+    b
+      .overrideProvider(INGESTION_CONFIG)
+      .useValue(
+        loadIngestionConfig({
+          POLL_INTERVAL_MS: '20',
+          MAX_DELIVERIES: '2',
+          RETRY_BASE_DELAY_MS: '10',
+          RETRY_MAX_DELAY_MS: '50',
+          INDEX_SINK: 'retrieval',
+          RETRIEVAL_URL: retrieval.url,
+          TOKEN_ENDPOINT: obo.url,
+          CLIENT_ID: 'ingestion-app',
+        }),
+      )
+      .overrideProvider(SECRET_PROVIDER)
+      .useValue(new EnvSecretProvider({ SECRET_INGESTION_CLIENT_SECRET: 'ingestion-secret' })),
+  );
+
   return new Stack(
     issuer,
     {
+      ingestion: ingestion.url,
       assistant: assistant.url,
       retrieval: retrieval.url,
       gateway: gateway.url,
@@ -214,6 +292,7 @@ export async function startStack(): Promise<Stack> {
     },
     llm,
     {
+      ingestion: ingestion.app,
       assistant: assistant.app,
       retrieval: retrieval.app,
       gateway: gateway.app,
@@ -223,37 +302,33 @@ export async function startStack(): Promise<Stack> {
   );
 }
 
-/** The documents used by the tests and the demo: one open, one manager-only, one for another tenant. */
+/**
+ * The documents used by the tests and the demo, uploaded the way a person would: through the
+ * ingestion service, which chunks them and writes them to search with their access list.
+ */
 export async function seedDocuments(stack: Stack): Promise<void> {
-  await stack.index('acme-bank', 'handbook', [
-    {
-      index: 0,
-      text: '# Refunds\nRefunds take five working days to reach the original card.',
-      metadata: { headingPath: ['Refunds'] },
-    },
-    {
-      index: 1,
-      text: '# Cards\nA lost card can be blocked at any time in the mobile app.',
-      metadata: { headingPath: ['Cards'] },
-    },
-  ]);
-  await stack.index(
-    'acme-bank',
-    'salary-bands',
-    [
-      {
-        index: 0,
-        text: '# Salary bands\nSalary bands for managers start at level M1 and are reviewed every year.',
-        metadata: { headingPath: ['Salary bands'] },
-      },
-    ],
-    { allowedRoles: ['manager'] },
-  );
-  await stack.index('globex', 'handbook', [
-    {
-      index: 0,
-      text: '# Refunds\nRefunds take ten working days at Globex.',
-      metadata: { headingPath: ['Refunds'] },
-    },
-  ]);
+  const uploads = [
+    stack.uploadAndWait('acme-bank', {
+      documentId: 'handbook',
+      filename: 'handbook.md',
+      content:
+        '# Refunds\nRefunds take five working days to reach the original card.\n\n' +
+        '# Cards\nA lost card can be blocked at any time in the mobile app.',
+    }),
+    stack.uploadAndWait('acme-bank', {
+      documentId: 'salary-bands',
+      filename: 'salary-bands.md',
+      content:
+        '# Salary bands\nSalary bands for managers start at level M1 and are reviewed every year.',
+      allowedRoles: ['manager'],
+    }),
+    stack.uploadAndWait('globex', {
+      documentId: 'handbook',
+      filename: 'handbook.md',
+      content: '# Refunds\nRefunds take ten working days at Globex.',
+    }),
+  ];
+  for (const { status } of await Promise.all(uploads)) {
+    if (status !== 'succeeded') throw new Error(`seeding failed: ${status}`);
+  }
 }
