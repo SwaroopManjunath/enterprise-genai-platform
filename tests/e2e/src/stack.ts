@@ -107,10 +107,16 @@ export class Stack {
     chunks: { index: number; text: string; metadata?: object }[],
     options: { allowedRoles?: string[]; tags?: string[] } = {},
   ): Promise<void> {
-    const res = await this.call('PUT', 'retrieval', `/v1/index/documents/${documentId}`, {
-      token: this.token('retrieval', { tenant, roles: ['indexer'] }),
-      body: { chunks, ...options },
-    });
+    const res = await this.call(
+      'PUT',
+      'retrieval',
+      `/v1/tenants/${tenant}/index/documents/${documentId}`,
+      {
+        // A service identity acting for the named tenant, as the ingestion pipeline does.
+        token: this.token('retrieval', { tenant: 'platform-services', roles: ['indexer'] }),
+        body: { chunks, ...options },
+      },
+    );
     if (res.status !== 200) throw new Error(`indexing ${documentId} failed: ${res.status}`);
   }
 

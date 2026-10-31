@@ -157,10 +157,15 @@ describe('login -> ask -> cited answer, across the real services', () => {
     });
 
     it('does not let an end user write to the search index, even a manager', async () => {
-      const res = await stack.call('PUT', 'retrieval', '/v1/index/documents/planted', {
-        token: stack.token('retrieval', manager),
-        body: { chunks: [{ index: 0, text: 'planted content about refunds' }] },
-      });
+      const res = await stack.call(
+        'PUT',
+        'retrieval',
+        '/v1/tenants/acme-bank/index/documents/planted',
+        {
+          token: stack.token('retrieval', manager),
+          body: { chunks: [{ index: 0, text: 'planted content about refunds' }] },
+        },
+      );
       expect(res.status).toBe(403);
     });
   });

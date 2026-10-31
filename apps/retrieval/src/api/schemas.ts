@@ -16,6 +16,10 @@ export const upsertDocumentSchema = z
       .max(500),
     allowedRoles: z.array(roleName).max(20).optional(),
     tags: z.array(roleName).max(20).optional(),
+    contentHash: z
+      .string()
+      .regex(/^[a-f0-9]{16,128}$/, 'lowercase hex digest')
+      .optional(),
   })
   .refine((doc) => new Set(doc.chunks.map((c) => c.index)).size === doc.chunks.length, {
     message: 'chunk indexes must be unique',
@@ -34,3 +38,6 @@ export const searchSchema = z.object({
     })
     .optional(),
 });
+
+/** Document ids become part of chunk ids and index keys, so they get a strict shape. */
+export const documentIdSchema = z.string().regex(/^[A-Za-z0-9._:-]{1,128}$/);

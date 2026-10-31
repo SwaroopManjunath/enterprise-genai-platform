@@ -1,16 +1,20 @@
 import { CurrentPrincipal, RequireRoles, type AuthenticatedPrincipal } from '@genai/auth';
-import { Body, Controller, Delete, HttpCode, Param, Post, Put } from '@nestjs/common';
+import { createTenantContext } from '@genai/shared';
+import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put } from '@nestjs/common';
 import { DocumentNotFoundError } from '../errors';
 import { IndexingService } from '../index/indexing.service';
 import type { ChunkFilter } from '../index/search-index';
 import { SearchService } from '../search/search.service';
-import { searchSchema, upsertDocumentSchema } from './schemas';
+import { documentIdSchema, searchSchema, upsertDocumentSchema } from './schemas';
 
 /**
- * Writing to the search index is a service-level operation (the ingestion pipeline's app role), not
- * something an end user does, so it needs its own role.
+ * Writing to the search index is a service-level operation: the ingestion pipeline's own
+ * identity holds this role, end users never do (not even managers).
  */
 export const INDEXER_ROLE = 'indexer';
+
+/** The tenant in a path is only honoured for a caller who holds the indexer role. */
+const tenantFromPath = (tenantId: string): string => createTenantContext({ tenantId }).tenantId;
 
 @Controller('v1')
 export class RetrievalController {
@@ -19,30 +23,46 @@ export class RetrievalController {
     private readonly searching: SearchService,
   ) {}
 
-  /** Replaces a document's chunks. Idempotent: sending the same body twice leaves the same state. */
+  /**
+   * Replaces a tenant's document. The tenant is named in the path because the caller is a
+   * service (the ingestion pipeline) acting for whichever tenant uploaded the document, and a
+   * service identity has no customer tenant of its own. Idempotent: the same body twice leaves the
+   * same state.
+   */
   @RequireRoles(INDEXER_ROLE)
-  @Put('index/documents/:documentId')
+  @Put('tenants/:tenantId/index/documents/:documentId')
   upsert(
-    @CurrentPrincipal() caller: AuthenticatedPrincipal,
+    @Param('tenantId') tenantId: string,
     @Param('documentId') documentId: string,
     @Body() body: unknown,
   ) {
     return this.indexing.upsertDocument(
-      caller.tenantId,
-      documentId,
+      tenantFromPath(tenantId),
+      documentIdSchema.parse(documentId),
       upsertDocumentSchema.parse(body),
     );
   }
 
+  /** Whether a document is indexed and with which content hash, so unchanged uploads can be skipped. */
   @RequireRoles(INDEXER_ROLE)
-  @Delete('index/documents/:documentId')
-  async remove(
-    @CurrentPrincipal() caller: AuthenticatedPrincipal,
-    @Param('documentId') documentId: string,
-  ) {
-    if (!(await this.indexing.deleteDocument(caller.tenantId, documentId))) {
-      throw new DocumentNotFoundError(documentId);
-    }
+  @Get('tenants/:tenantId/index/documents/:documentId')
+  async info(@Param('tenantId') tenantId: string, @Param('documentId') documentId: string) {
+    const info = await this.indexing.getDocument(
+      tenantFromPath(tenantId),
+      documentIdSchema.parse(documentId),
+    );
+    if (!info) throw new DocumentNotFoundError(documentId);
+    return info;
+  }
+
+  @RequireRoles(INDEXER_ROLE)
+  @Delete('tenants/:tenantId/index/documents/:documentId')
+  async remove(@Param('tenantId') tenantId: string, @Param('documentId') documentId: string) {
+    const deleted = await this.indexing.deleteDocument(
+      tenantFromPath(tenantId),
+      documentIdSchema.parse(documentId),
+    );
+    if (!deleted) throw new DocumentNotFoundError(documentId);
     return { documentId, deleted: true };
   }
 

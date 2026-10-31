@@ -27,6 +27,7 @@ describe('retrieval API', () => {
     const http = () => request(app.getHttpServer());
     return {
       put: (path: string, body: object) => http().put(path).set('authorization', bearer).send(body),
+      get: (path: string) => http().get(path).set('authorization', bearer),
       del: (path: string) => http().delete(path).set('authorization', bearer),
       search: (body: object) => http().post('/v1/search').set('authorization', bearer).send(body),
     };
@@ -35,7 +36,7 @@ describe('retrieval API', () => {
 
   const seed = async () => {
     const admin = indexer('acme');
-    await admin.put('/v1/index/documents/faq', {
+    await admin.put('/v1/tenants/acme/index/documents/faq', {
       chunks: [
         {
           index: 0,
@@ -50,7 +51,7 @@ describe('retrieval API', () => {
       ],
       tags: ['support'],
     });
-    await admin.put('/v1/index/documents/salary', {
+    await admin.put('/v1/tenants/acme/index/documents/salary', {
       chunks: [{ index: 0, text: 'Confidential salary bands for managers' }],
       allowedRoles: ['Manager'],
     });
@@ -139,14 +140,14 @@ describe('retrieval API', () => {
     await seed();
     const acme = as('acme', ['analyst', 'indexer']);
 
-    await acme.put('/v1/index/documents/faq', {
+    await acme.put('/v1/tenants/acme/index/documents/faq', {
       chunks: [{ index: 0, text: 'Refunds are now instant' }],
     });
     const after = await acme.search({ query: 'cards blocked' });
     expect(after.body.results.map((r: { chunkId: string }) => r.chunkId)).not.toContain('faq:1');
 
-    await acme.del('/v1/index/documents/faq').expect(200);
-    await acme.del('/v1/index/documents/faq').expect(404);
+    await acme.del('/v1/tenants/acme/index/documents/faq').expect(200);
+    await acme.del('/v1/tenants/acme/index/documents/faq').expect(404);
     expect((await acme.search({ query: 'refunds instant' })).body.results).toEqual([]);
   });
 
@@ -156,9 +157,10 @@ describe('retrieval API', () => {
     const chunks = [{ index: 0, text: 'planted content' }];
 
     expect(
-      (await user.put('/v1/index/documents/planted', { chunks }).expect(403)).body.error.code,
+      (await user.put('/v1/tenants/acme/index/documents/planted', { chunks }).expect(403)).body
+        .error.code,
     ).toBe('forbidden');
-    await user.del('/v1/index/documents/faq').expect(403);
+    await user.del('/v1/tenants/acme/index/documents/faq').expect(403);
     // Nothing changed: the document is still searchable and the planted one does not exist.
     expect(documentsOf(await user.search({ query: 'refunds' }))).toContain('faq');
     expect(documentsOf(await user.search({ query: 'planted content' }))).not.toContain('planted');
@@ -176,6 +178,68 @@ describe('retrieval API', () => {
       .expect(401);
   });
 
+  it('lets the indexer service act for a named tenant, whatever its own token says', async () => {
+    // The service token carries the platform's tenant, not a customer's; the path names the tenant.
+    const service = as('platform-services', ['indexer']);
+    await service
+      .put('/v1/tenants/globex/index/documents/handbook', {
+        chunks: [{ index: 0, text: 'Globex refunds take ten working days.' }],
+      })
+      .expect(200);
+
+    const globex = await as('globex', ['analyst']).search({ query: 'refunds take' }).expect(200);
+    const acme = await as('acme', ['analyst']).search({ query: 'refunds take' }).expect(200);
+
+    expect(documentsOf(globex)).toEqual(['handbook']);
+    expect(documentsOf(acme)).not.toContain('handbook');
+  });
+
+  it('remembers the content hash, so the writer can tell an unchanged re-upload', async () => {
+    const indexerCaller = as('platform-services', ['indexer']);
+    const hash = 'a'.repeat(64);
+    const path = '/v1/tenants/acme/index/documents/policy';
+
+    await indexerCaller.get(path).expect(404);
+    await indexerCaller.put(path, {
+      chunks: [{ index: 0, text: 'policy text' }],
+      contentHash: hash,
+    });
+
+    const info = (await indexerCaller.get(path).expect(200)).body;
+    expect(info).toMatchObject({ documentId: 'policy', contentHash: hash, chunkCount: 1 });
+    expect(Date.parse(info.indexedAt)).not.toBeNaN();
+  });
+
+  it('keeps index bookkeeping from end users: document info needs the indexer role', async () => {
+    await seed();
+    const manager = as('acme', ['manager']);
+
+    await manager.get('/v1/tenants/acme/index/documents/salary').expect(403);
+    await manager.get('/v1/tenants/acme/index/documents/faq').expect(403);
+  });
+
+  it('rejects an invalid tenant or document id in the path, and the old tenant-less routes are gone', async () => {
+    const service = as('platform-services', ['indexer']);
+    const chunks = [{ index: 0, text: 'x' }];
+
+    expect(
+      (await service.put('/v1/tenants/Not%20A%20Tenant/index/documents/d', { chunks }).expect(400))
+        .body.error.code,
+    ).toBe('invalid_tenant');
+    expect(
+      (await service.put('/v1/tenants/acme/index/documents/bad%20id', { chunks }).expect(400)).body
+        .error.code,
+    ).toBe('invalid_request');
+    expect(
+      (
+        await service
+          .put('/v1/tenants/acme/index/documents/d', { chunks, contentHash: 'NOT-HEX' })
+          .expect(400)
+      ).body.error.code,
+    ).toBe('invalid_request');
+    await service.put('/v1/index/documents/d', { chunks }).expect(404);
+  });
+
   it('validates input', async () => {
     const acme = as('acme', ['indexer']);
     const code = async (r: request.Test, status: number) =>
@@ -186,7 +250,7 @@ describe('retrieval API', () => {
     expect(await code(acme.search({ query: 'x', mode: 'fuzzy' }), 400)).toBe('invalid_request');
     expect(
       await code(
-        acme.put('/v1/index/documents/d', {
+        acme.put('/v1/tenants/acme/index/documents/d', {
           chunks: [
             { index: 0, text: 'a' },
             { index: 0, text: 'b' },

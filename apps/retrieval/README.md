@@ -35,8 +35,9 @@ PORT=3003 node apps/retrieval/dist/main.js
 ```bash
 mint() { npm run -s dev-token -w @genai/auth -- mint --tenant acme-bank --roles "$1"; }
 
-# index a document (needs the `indexer` role), restricted to managers
-curl -s -X PUT localhost:3003/v1/index/documents/salary \
+# index a document, as the ingestion service would (needs the `indexer` role; the tenant is in the
+# path). Restricted to managers:
+curl -s -X PUT localhost:3003/v1/tenants/acme-bank/index/documents/salary \
   -H 'content-type: application/json' -H "authorization: Bearer $(mint indexer)" \
   -d '{"chunks":[{"index":0,"text":"Confidential salary bands for managers"}],"allowedRoles":["manager"]}'
 
@@ -55,15 +56,18 @@ Every route needs `Authorization: Bearer <JWT>`. Tenant **and roles** come from 
 (see [ADR 0007](../../docs/adr/0007-authentication-and-authorization.md)), so a client cannot widen
 what it sees by sending a header: that is what makes the access trimming trustworthy. Search is open
 to any authenticated user (and trimmed to their tenant and roles). Changing the index needs the
-`indexer` role, which belongs to the ingestion pipeline's service identity, not to end users.
+`indexer` role, which belongs to the ingestion pipeline's service identity, not to end users. That
+service has no customer tenant of its own, so the tenant it acts for is named in the path.
 
-| Method | Path                      | Purpose                                          |
-| ------ | ------------------------- | ------------------------------------------------ |
-| PUT    | `/v1/index/documents/:id` | Replace a document's chunks (idempotent)         |
-| DELETE | `/v1/index/documents/:id` | Remove a document                                |
-| POST   | `/v1/search`              | Search; returns ranked chunks with their signals |
+| Method | Path                                      | Purpose                                                  |
+| ------ | ----------------------------------------- | -------------------------------------------------------- |
+| PUT    | `/v1/tenants/:tenant/index/documents/:id` | Replace a document's chunks (idempotent); `indexer` only |
+| GET    | `/v1/tenants/:tenant/index/documents/:id` | Is it indexed, with which content hash; `indexer` only   |
+| DELETE | `/v1/tenants/:tenant/index/documents/:id` | Remove a document; `indexer` only                        |
+| POST   | `/v1/search`                              | Search; returns ranked chunks with their signals         |
 
-`PUT` body: `{ chunks: [{ index, text, metadata? }], allowedRoles?, tags? }`. Empty `allowedRoles`
+`PUT` body: `{ chunks: [{ index, text, metadata? }], allowedRoles?, tags?, contentHash? }`. The hash
+(lowercase hex) is stored so the writer can skip an unchanged re-upload. Empty `allowedRoles`
 means anyone in the tenant.
 
 `POST /v1/search` body: `{ query, topK (1-20, default 5), mode: "hybrid" | "keyword" | "vector",
