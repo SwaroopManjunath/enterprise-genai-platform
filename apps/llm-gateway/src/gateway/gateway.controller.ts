@@ -1,3 +1,4 @@
+import { CurrentPrincipal, type AuthenticatedPrincipal } from '@genai/auth';
 import { Body, Controller, Headers, HttpCode, Post, Res } from '@nestjs/common';
 import { createTenantContext } from '@genai/shared';
 import type { Response } from 'express';
@@ -11,15 +12,17 @@ export class GatewayController {
   @Post('chat/completions')
   @HttpCode(200)
   async chat(
-    @Headers('x-tenant-id') tenantId: string | undefined,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal,
     @Headers('x-request-id') requestId: string | undefined,
     @Body() body: unknown,
     @Res({ passthrough: true }) res: Response,
   ) {
-    // Interim identity: the tenant comes from a header. Step 6 replaces this with a validated
-    // Entra ID JWT so a caller can no longer claim an arbitrary tenant.
+    // Identity comes only from the verified token. x-request-id is a correlation id for tracing,
+    // not an identity claim, so honouring it is safe.
     const ctx = createTenantContext({
-      tenantId: tenantId ?? '',
+      tenantId: principal.tenantId,
+      userId: principal.userId,
+      roles: principal.roles,
       ...(requestId !== undefined && { requestId }),
     });
     const request = parseChatRequest(body);

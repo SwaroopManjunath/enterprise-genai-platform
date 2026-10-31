@@ -1,15 +1,27 @@
 import { z } from 'zod';
 
-const deploymentSchema = z.object({
-  /** Label used in logs and responses, e.g. "aoai-westeurope". */
-  name: z.string().min(1),
-  endpoint: z.string().url(),
-  deployment: z.string().min(1),
-  apiKey: z.string().min(1),
-  apiVersion: z.string().default('2024-10-21'),
-});
+const deploymentSchema = z
+  .object({
+    /** Label used in logs and responses, e.g. "aoai-westeurope". */
+    name: z.string().min(1),
+    endpoint: z.string().url(),
+    deployment: z.string().min(1),
+    /** Inline key: local experiments only. Prefer `apiKeySecret`. */
+    apiKey: z.string().min(1).optional(),
+    /** Name of the key in the secret store (Key Vault in Azure); resolved at startup. */
+    apiKeySecret: z.string().min(1).optional(),
+    apiVersion: z.string().default('2024-10-21'),
+  })
+  .refine((d) => Boolean(d.apiKey) !== Boolean(d.apiKeySecret), {
+    message: 'set exactly one of apiKey or apiKeySecret',
+  });
 
 export type AzureDeploymentConfig = z.infer<typeof deploymentSchema>;
+
+/** A deployment whose credential has been looked up, ready to call. */
+export type ResolvedAzureDeployment = Omit<AzureDeploymentConfig, 'apiKey' | 'apiKeySecret'> & {
+  apiKey: string;
+};
 
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),

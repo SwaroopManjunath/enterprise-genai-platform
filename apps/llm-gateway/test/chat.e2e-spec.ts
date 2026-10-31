@@ -1,3 +1,4 @@
+import { TOKEN_VERIFIER, TestIssuer } from '@genai/auth';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -10,6 +11,7 @@ import { LlmRouter } from '../src/resilience/llm-router';
 
 const retry = { maxAttempts: 2, baseDelayMs: 1, maxDelayMs: 1, sleep: () => Promise.resolve() };
 const body = { messages: [{ role: 'user', content: 'hello gateway' }] };
+const issuer = new TestIssuer();
 
 interface Overrides {
   providers?: LlmProvider[];
@@ -19,6 +21,8 @@ interface Overrides {
 
 async function createApp(overrides: Overrides = {}): Promise<INestApplication> {
   const builder = Test.createTestingModule({ imports: [AppModule] })
+    .overrideProvider(TOKEN_VERIFIER)
+    .useValue(issuer.verifier())
     .overrideProvider(LlmRouter)
     .useValue(new LlmRouter(overrides.providers ?? [new MockProvider()], retry))
     .overrideProvider(RATE_LIMITER)
@@ -38,7 +42,7 @@ describe('POST /v1/chat/completions', () => {
 
   const post = (tenant: string | undefined, payload: unknown = body) => {
     const req = request(app.getHttpServer()).post('/v1/chat/completions');
-    if (tenant !== undefined) req.set('x-tenant-id', tenant);
+    if (tenant !== undefined) req.set('authorization', `Bearer ${issuer.mint({ tenant })}`);
     return req.send(payload as object);
   };
 
@@ -58,14 +62,35 @@ describe('POST /v1/chat/completions', () => {
     expect(res.headers['x-request-id']).toBe('trace-1');
   });
 
-  it('rejects a missing or malformed tenant with 400', async () => {
+  it('requires a valid token: no token, expired, wrong audience and forged all get 401', async () => {
     app = await createApp();
+    const send = (authorization?: string) => {
+      const req = request(app.getHttpServer()).post('/v1/chat/completions');
+      return (authorization ? req.set('authorization', authorization) : req).send(body);
+    };
 
-    const missing = await post(undefined).expect(400);
-    const malformed = await post('Not A Tenant!').expect(400);
+    await send().expect(401);
+    await send(`Bearer ${issuer.mint({ tenant: 'acme', expiresInSec: -999 })}`).expect(401);
+    await send(`Bearer ${issuer.mint({ tenant: 'acme', audience: 'api://other' })}`).expect(401);
+    await send(`Bearer ${issuer.forge.otherKey({ tenant: 'acme' })}`).expect(401);
+    const res = await send(`Bearer ${issuer.mint({ tenant: 'Not A Tenant!' })}`).expect(401);
 
-    expect(missing.body.error.code).toBe('invalid_tenant');
-    expect(malformed.body.error.code).toBe('invalid_tenant');
+    expect(res.body.error.code).toBe('unauthorized');
+  });
+
+  it('takes the tenant from the token and ignores a spoofed x-tenant-id header', async () => {
+    app = await createApp({ requestsPerMinute: 1 });
+    const token = `Bearer ${issuer.mint({ tenant: 'acme' })}`;
+    const call = (spoofedTenant: string) =>
+      request(app.getHttpServer())
+        .post('/v1/chat/completions')
+        .set('authorization', token)
+        .set('x-tenant-id', spoofedTenant)
+        .send(body);
+
+    await call('globex').expect(200);
+    // A different claimed tenant does not buy a fresh rate-limit bucket: still tenant "acme".
+    await call('initech').expect(429);
   });
 
   it('rejects an invalid body with field-level issues', async () => {
