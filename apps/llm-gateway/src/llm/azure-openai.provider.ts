@@ -1,4 +1,4 @@
-import type { AzureDeploymentConfig } from '../config/config';
+import type { ResolvedAzureDeployment } from '../config/config';
 import { ProviderError } from './provider-error';
 import type { ChatRequest, ChatResult, LlmProvider } from './types';
 
@@ -14,7 +14,7 @@ export class AzureOpenAiProvider implements LlmProvider {
   readonly name: string;
 
   constructor(
-    private readonly config: AzureDeploymentConfig,
+    private readonly config: ResolvedAzureDeployment,
     private readonly timeoutMs: number,
     private readonly fetchImpl: FetchLike = fetch,
   ) {

@@ -1,3 +1,9 @@
+import {
+  EnvSecretProvider,
+  SECRET_PROVIDER,
+  authProviders,
+  type SecretProvider,
+} from '@genai/auth';
 import { Logger, Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { loadConfig, type GatewayConfig } from './config/config';
@@ -9,21 +15,32 @@ import { InMemoryTokenBucketRateLimiter, RATE_LIMITER } from './limits/rate-limi
 import { InMemoryTokenQuota, TOKEN_QUOTA } from './limits/token-quota';
 import { AzureOpenAiProvider } from './llm/azure-openai.provider';
 import { MockProvider } from './llm/mock.provider';
+import { resolveDeployments } from './llm/resolve-deployments';
 import { LLM_PROVIDERS, type LlmProvider } from './llm/types';
 import { LlmRouter } from './resilience/llm-router';
 
 export const GATEWAY_CONFIG = Symbol('GATEWAY_CONFIG');
 
-function buildProviders(config: GatewayConfig): LlmProvider[] {
+async function buildProviders(
+  config: GatewayConfig,
+  secrets: SecretProvider,
+): Promise<LlmProvider[]> {
   if (config.provider === 'mock') return [new MockProvider()];
-  return config.deployments.map((d) => new AzureOpenAiProvider(d, config.upstreamTimeoutMs));
+  const deployments = await resolveDeployments(config.deployments, secrets);
+  return deployments.map((d) => new AzureOpenAiProvider(d, config.upstreamTimeoutMs));
 }
 
 @Module({
   controllers: [HealthController, GatewayController],
   providers: [
     { provide: GATEWAY_CONFIG, useFactory: () => loadConfig() },
-    { provide: LLM_PROVIDERS, inject: [GATEWAY_CONFIG], useFactory: buildProviders },
+    // Env-backed locally. In Azure, wire KeyVaultSecretProvider with a managed identity here.
+    { provide: SECRET_PROVIDER, useFactory: () => new EnvSecretProvider() },
+    {
+      provide: LLM_PROVIDERS,
+      inject: [GATEWAY_CONFIG, SECRET_PROVIDER],
+      useFactory: buildProviders,
+    },
     {
       provide: RATE_LIMITER,
       inject: [GATEWAY_CONFIG],
@@ -47,6 +64,7 @@ function buildProviders(config: GatewayConfig): LlmProvider[] {
     },
     GatewayService,
     { provide: APP_FILTER, useClass: GatewayExceptionFilter },
+    ...authProviders(),
   ],
 })
 export class AppModule {}
