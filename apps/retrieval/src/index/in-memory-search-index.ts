@@ -3,6 +3,7 @@ import {
   type Caller,
   type ChunkFilter,
   type DocumentAcl,
+  type DocumentInfo,
   type SearchIndex,
   type SearchableChunk,
 } from './search-index';
@@ -10,6 +11,8 @@ import {
 interface StoredDocument {
   acl: DocumentAcl;
   chunks: readonly SearchableChunk[];
+  contentHash: string | undefined;
+  indexedAt: string;
 }
 
 /** Keyed by tenant then document, so a tenant's data is unreachable from another tenant's calls. */
@@ -21,13 +24,30 @@ export class InMemorySearchIndex implements SearchIndex {
     documentId: string,
     chunks: readonly SearchableChunk[],
     acl: DocumentAcl,
+    contentHash?: string,
   ): Promise<void> {
     const tenant = this.byTenant.get(tenantId) ?? new Map<string, StoredDocument>();
     // One assignment swaps the whole document: readers see all-old or all-new, never a mix, and
     // chunks from an older, longer version disappear.
-    tenant.set(documentId, { acl: structuredClone(acl), chunks: structuredClone(chunks) });
+    tenant.set(documentId, {
+      acl: structuredClone(acl),
+      chunks: structuredClone(chunks),
+      contentHash,
+      indexedAt: new Date().toISOString(),
+    });
     this.byTenant.set(tenantId, tenant);
     return Promise.resolve();
+  }
+
+  getDocument(tenantId: string, documentId: string): Promise<DocumentInfo | undefined> {
+    const stored = this.byTenant.get(tenantId)?.get(documentId);
+    if (!stored) return Promise.resolve(undefined);
+    return Promise.resolve({
+      documentId,
+      ...(stored.contentHash !== undefined && { contentHash: stored.contentHash }),
+      chunkCount: stored.chunks.length,
+      indexedAt: stored.indexedAt,
+    });
   }
 
   deleteDocument(tenantId: string, documentId: string): Promise<boolean> {

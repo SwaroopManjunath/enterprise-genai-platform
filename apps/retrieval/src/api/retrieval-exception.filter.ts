@@ -1,10 +1,11 @@
+import { InvalidTenantError } from '@genai/shared';
 import { Catch, type ArgumentsHost, type ExceptionFilter } from '@nestjs/common';
 import type { Response } from 'express';
 import { ZodError } from 'zod';
 import { DocumentNotFoundError } from '../errors';
 
 /** Maps domain errors to stable HTTP responses: `{ error: { code, message } }`. */
-@Catch(DocumentNotFoundError, ZodError)
+@Catch(DocumentNotFoundError, InvalidTenantError, ZodError)
 export class RetrievalExceptionFilter implements ExceptionFilter {
   catch(error: unknown, host: ArgumentsHost): void {
     const res = host.switchToHttp().getResponse<Response>();
@@ -13,6 +14,9 @@ export class RetrievalExceptionFilter implements ExceptionFilter {
 
     if (error instanceof DocumentNotFoundError)
       return send(404, 'document_not_found', error.message);
+    if (error instanceof InvalidTenantError) {
+      return send(400, 'invalid_tenant', 'The tenant in the path is not a valid tenant id');
+    }
     if (error instanceof ZodError) {
       return send(400, 'invalid_request', 'Request failed validation', {
         issues: error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),

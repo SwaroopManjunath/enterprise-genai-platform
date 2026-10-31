@@ -131,3 +131,52 @@ describe('SearchIndex access trimming', () => {
     expect(await ids(index, 'acme', ['manager'])).toEqual(['managers:0']);
   });
 });
+
+describe('document info and content hash', () => {
+  const hash = 'b'.repeat(64);
+
+  it('records the hash and chunk count, and updates them when the document is replaced', async () => {
+    const { indexing } = setup();
+
+    await indexing.upsertDocument('acme', 'doc', {
+      chunks: [
+        { index: 0, text: 'one' },
+        { index: 1, text: 'two' },
+      ],
+      contentHash: hash,
+    });
+    expect(await indexing.getDocument('acme', 'doc')).toMatchObject({
+      documentId: 'doc',
+      contentHash: hash,
+      chunkCount: 2,
+    });
+
+    await indexing.upsertDocument('acme', 'doc', {
+      chunks: [{ index: 0, text: 'one' }],
+      contentHash: 'c'.repeat(64),
+    });
+    expect(await indexing.getDocument('acme', 'doc')).toMatchObject({
+      contentHash: 'c'.repeat(64),
+      chunkCount: 1,
+    });
+  });
+
+  it('has no hash when none was given, and nothing once deleted', async () => {
+    const { indexing } = setup();
+    await indexing.upsertDocument('acme', 'doc', { chunks: [{ index: 0, text: 'x' }] });
+
+    expect(await indexing.getDocument('acme', 'doc')).not.toHaveProperty('contentHash');
+    await indexing.deleteDocument('acme', 'doc');
+    expect(await indexing.getDocument('acme', 'doc')).toBeUndefined();
+  });
+
+  it('does not show one tenant the bookkeeping of another', async () => {
+    const { indexing } = setup();
+    await indexing.upsertDocument('acme', 'doc', {
+      chunks: [{ index: 0, text: 'x' }],
+      contentHash: hash,
+    });
+
+    expect(await indexing.getDocument('globex', 'doc')).toBeUndefined();
+  });
+});

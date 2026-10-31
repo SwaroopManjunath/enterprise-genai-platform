@@ -18,6 +18,13 @@ export interface DocumentAcl {
   tags: readonly string[];
 }
 
+export interface DocumentInfo {
+  documentId: string;
+  contentHash?: string;
+  chunkCount: number;
+  indexedAt: string;
+}
+
 export interface Caller {
   tenantId: string;
   roles: readonly string[];
@@ -44,12 +51,19 @@ export function isVisible(acl: DocumentAcl, roles: readonly string[]): boolean {
  * Azure AI Search this is a pre-filter (`$filter`) applied to the query, not a post-filter.
  */
 export interface SearchIndex {
+  /**
+   * Replaces the document as a unit. `contentHash` is remembered so the service that wrote it
+   * (ingestion) can ask later whether a re-upload is unchanged and skip the work.
+   */
   replaceDocument(
     tenantId: string,
     documentId: string,
     chunks: readonly SearchableChunk[],
     acl: DocumentAcl,
+    contentHash?: string,
   ): Promise<void>;
+  /** Bookkeeping about an indexed document. Not access-trimmed: for the indexing service only. */
+  getDocument(tenantId: string, documentId: string): Promise<DocumentInfo | undefined>;
   deleteDocument(tenantId: string, documentId: string): Promise<boolean>;
   candidates(caller: Caller, filter?: ChunkFilter): Promise<readonly SearchableChunk[]>;
 }

@@ -1,6 +1,6 @@
 import type { Embedder } from '../embedding/embedder';
 import { termFrequencies, tokenize } from '../text/tokenizer';
-import type { SearchIndex, SearchableChunk } from './search-index';
+import type { DocumentInfo, SearchIndex, SearchableChunk } from './search-index';
 
 export interface IndexChunkInput {
   index: number;
@@ -13,6 +13,8 @@ export interface UpsertDocumentInput {
   /** Roles allowed to read this document; omit or leave empty for the whole tenant. */
   allowedRoles?: string[];
   tags?: string[];
+  /** Hash of the source content, kept so the writer can detect unchanged re-uploads. */
+  contentHash?: string;
 }
 
 export function chunkIdOf(documentId: string, index: number): string {
@@ -52,11 +54,18 @@ export class IndexingService {
       };
     });
 
-    await this.index.replaceDocument(tenantId, documentId, chunks, {
-      allowedRoles: normalizeList(input.allowedRoles),
-      tags: normalizeList(input.tags),
-    });
+    await this.index.replaceDocument(
+      tenantId,
+      documentId,
+      chunks,
+      { allowedRoles: normalizeList(input.allowedRoles), tags: normalizeList(input.tags) },
+      input.contentHash,
+    );
     return { documentId, chunkCount: chunks.length };
+  }
+
+  getDocument(tenantId: string, documentId: string): Promise<DocumentInfo | undefined> {
+    return this.index.getDocument(tenantId, documentId);
   }
 
   deleteDocument(tenantId: string, documentId: string): Promise<boolean> {
