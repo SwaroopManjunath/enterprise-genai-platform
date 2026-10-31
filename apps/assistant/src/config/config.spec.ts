@@ -30,4 +30,28 @@ describe('loadConfig', () => {
   it('rejects an out-of-range top K', () => {
     expect(() => loadConfig({ ...required, DEFAULT_TOP_K: '50' })).toThrow();
   });
+
+  describe('guardrails', () => {
+    it('defaults to enforcing, redacting the high-risk kinds from answers', () => {
+      expect(loadConfig(required).guardrails).toEqual({
+        mode: 'enforce',
+        outputPii: ['secret', 'card', 'iban'],
+      });
+    });
+
+    it('can be set to monitor mode and a custom list of kinds', () => {
+      expect(
+        loadConfig({
+          ...required,
+          GUARDRAILS_MODE: 'monitor',
+          GUARDRAILS_OUTPUT_PII: 'email, phone',
+        }).guardrails,
+      ).toEqual({ mode: 'monitor', outputPii: ['email', 'phone'] });
+    });
+
+    it('rejects an unknown mode or kind, so a typo cannot silently weaken a guardrail', () => {
+      expect(() => loadConfig({ ...required, GUARDRAILS_MODE: 'off' })).toThrow();
+      expect(() => loadConfig({ ...required, GUARDRAILS_OUTPUT_PII: 'secret,passport' })).toThrow();
+    });
+  });
 });

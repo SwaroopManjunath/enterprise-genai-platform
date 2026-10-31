@@ -1,5 +1,6 @@
 import { OboExchangeError } from '@genai/auth';
 import { DownstreamError } from '@genai/shared';
+import { GuardrailBlockedError } from './errors';
 import { Catch, Logger, type ArgumentsHost, type ExceptionFilter } from '@nestjs/common';
 import type { Response } from 'express';
 import { ZodError } from 'zod';
@@ -10,7 +11,7 @@ import { ZodError } from 'zod';
  *  - a dependency being down or slow is a temporary 503;
  *  - a dependency rejecting OUR credentials is our misconfiguration (502), not the user's fault.
  */
-@Catch(DownstreamError, OboExchangeError, ZodError)
+@Catch(DownstreamError, OboExchangeError, GuardrailBlockedError, ZodError)
 export class AskExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger('Ask');
 
@@ -24,6 +25,14 @@ export class AskExceptionFilter implements ExceptionFilter {
         'assistant_unavailable',
         'The assistant is temporarily unavailable. Try again shortly.',
       );
+
+    if (error instanceof GuardrailBlockedError) {
+      // Score and signal names for operators; the caller learns only that it was refused.
+      this.logger.warn(
+        `question blocked by guardrails (score ${error.report.injectionScore}, signals: ${error.report.injectionSignals.join(', ')})`,
+      );
+      return send(422, 'guardrail_blocked', 'This request cannot be processed.');
+    }
 
     if (error instanceof ZodError) {
       return send(400, 'invalid_request', 'Request failed validation', {

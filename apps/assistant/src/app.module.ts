@@ -7,6 +7,7 @@ import {
   type OboTokenClient,
   type SecretProvider,
 } from '@genai/auth';
+import { Guardrails } from '@genai/guardrails';
 import { HttpJsonClient } from '@genai/shared';
 import { Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
@@ -55,15 +56,29 @@ const http = (service: string, url: string, c: AssistantConfig): HttpJsonClient 
       useFactory: (c: AssistantConfig) => new GatewayClient(http('gateway', c.gateway.url, c)),
     },
     {
+      provide: Guardrails,
+      inject: [ASSISTANT_CONFIG],
+      useFactory: (c: AssistantConfig) =>
+        new Guardrails({ mode: c.guardrails.mode, outputPii: c.guardrails.outputPii }),
+    },
+    {
       provide: AskService,
-      inject: [RetrievalClient, PromptClient, GatewayClient, OBO_CLIENT, ASSISTANT_CONFIG],
+      inject: [
+        RetrievalClient,
+        PromptClient,
+        GatewayClient,
+        OBO_CLIENT,
+        ASSISTANT_CONFIG,
+        Guardrails,
+      ],
       useFactory: (
         retrieval: RetrievalClient,
         prompts: PromptClient,
         gateway: GatewayClient,
         obo: OboTokenClient,
         config: AssistantConfig,
-      ) => new AskService({ retrieval, prompts, gateway, obo }, config),
+        guardrails: Guardrails,
+      ) => new AskService({ retrieval, prompts, gateway, obo }, config, guardrails),
     },
     { provide: APP_FILTER, useClass: AskExceptionFilter },
     ...authProviders(),

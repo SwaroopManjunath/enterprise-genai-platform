@@ -1,3 +1,4 @@
+import type { PiiType } from '@genai/guardrails';
 import { z } from 'zod';
 
 const envSchema = z.object({
@@ -23,6 +24,23 @@ const envSchema = z.object({
   PROMPT_NAME: z.string().min(1).default('rag-answer'),
   DOWNSTREAM_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
   DEFAULT_TOP_K: z.coerce.number().int().min(1).max(8).default(4),
+
+  /**
+   * `enforce` blocks, quarantines and redacts. `monitor` is shadow mode: it reports what WOULD
+   * happen and changes nothing, for learning the false-positive rate before enforcing.
+   */
+  GUARDRAILS_MODE: z.enum(['enforce', 'monitor']).default('enforce'),
+  /** Kinds of sensitive data redacted from answers (questions always redact every kind). */
+  GUARDRAILS_OUTPUT_PII: z
+    .string()
+    .default('secret,card,iban')
+    .transform((list) =>
+      list
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean),
+    )
+    .pipe(z.array(z.enum(['secret', 'iban', 'card', 'email', 'phone']))),
 });
 
 export interface DownstreamConfig {
@@ -39,6 +57,7 @@ export interface AssistantConfig {
   promptName: string;
   downstreamTimeoutMs: number;
   defaultTopK: number;
+  guardrails: { mode: 'enforce' | 'monitor'; outputPii: PiiType[] };
 }
 
 export const ASSISTANT_CONFIG = Symbol('ASSISTANT_CONFIG');
@@ -59,5 +78,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AssistantConfi
     promptName: e.PROMPT_NAME,
     downstreamTimeoutMs: e.DOWNSTREAM_TIMEOUT_MS,
     defaultTopK: e.DEFAULT_TOP_K,
+    guardrails: { mode: e.GUARDRAILS_MODE, outputPii: e.GUARDRAILS_OUTPUT_PII },
   };
 }
