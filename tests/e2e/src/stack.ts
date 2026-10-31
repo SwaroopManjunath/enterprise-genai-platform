@@ -17,8 +17,8 @@ import {
   loadConfig as loadIngestionConfig,
 } from '../../../apps/ingestion/src/config/config';
 import { AppModule as GatewayModule } from '../../../apps/llm-gateway/src/app.module';
-import { GroundedMockProvider } from '../../../apps/llm-gateway/src/llm/grounded-mock.provider';
 import { LLM_PROVIDERS } from '../../../apps/llm-gateway/src/llm/types';
+import { GullibleProvider } from './gullible-provider';
 import { AppModule as PromptsModule } from '../../../apps/prompt-registry/src/app.module';
 import { AppModule as RetrievalModule } from '../../../apps/retrieval/src/app.module';
 
@@ -55,7 +55,7 @@ export class Stack {
   constructor(
     readonly issuer: TestIssuer,
     readonly urls: Record<Service, string>,
-    readonly llm: GroundedMockProvider,
+    readonly llm: GullibleProvider,
     private readonly apps: Record<Service, INestApplication>,
     private readonly oboEndpoint: RunningDevTokenEndpoint,
   ) {}
@@ -221,9 +221,15 @@ async function start(
   return { app, url: `http://127.0.0.1:${port}` };
 }
 
-export async function startStack(): Promise<Stack> {
+export interface StackOptions {
+  /** `monitor` is shadow mode: guardrails report what they would do but change nothing. */
+  guardrailsMode?: 'enforce' | 'monitor';
+}
+
+export async function startStack(options: StackOptions = {}): Promise<Stack> {
   const issuer = new TestIssuer();
-  const llm = new GroundedMockProvider();
+  // Behaves like the grounded mock unless an attack is present, and records every prompt it sees.
+  const llm = new GullibleProvider();
 
   const retrieval = await start(RetrievalModule, AUDIENCE.retrieval, issuer);
   const prompts = await start(PromptsModule, AUDIENCE.prompts, issuer);
@@ -255,6 +261,7 @@ export async function startStack(): Promise<Stack> {
           RETRIEVAL_URL: retrieval.url,
           OBO_TOKEN_ENDPOINT: obo.url,
           OBO_CLIENT_ID: 'assistant',
+          GUARDRAILS_MODE: options.guardrailsMode ?? 'enforce',
         }),
       )
       .overrideProvider(SECRET_PROVIDER)
