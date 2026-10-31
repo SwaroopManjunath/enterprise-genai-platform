@@ -10,6 +10,8 @@ export default {
         'docs',
         'shared',
         'gateway',
+        'assistant',
+        'e2e',
         'prompts',
         'ingestion',
         'retrieval',
