@@ -1,9 +1,9 @@
 import { OBO_CLIENT, OboExchangeError, TOKEN_VERIFIER, TestIssuer } from '@genai/auth';
+import { DownstreamError } from '@genai/shared';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
-import { DownstreamError } from '../src/clients/http-json-client';
 import { GatewayClient, PromptClient, RetrievalClient } from '../src/clients/service-clients';
 import { ASSISTANT_CONFIG, loadConfig } from '../src/config/config';
 

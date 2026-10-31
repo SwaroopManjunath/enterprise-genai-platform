@@ -1,8 +1,8 @@
 import { OboExchangeError } from '@genai/auth';
+import { DownstreamError } from '@genai/shared';
 import { Catch, Logger, type ArgumentsHost, type ExceptionFilter } from '@nestjs/common';
 import type { Response } from 'express';
 import { ZodError } from 'zod';
-import { DownstreamError } from '../clients/http-json-client';
 
 /**
  * Maps failures to what the caller can act on, without leaking internals:

@@ -1,7 +1,7 @@
 import type { AuthenticatedPrincipal, OboTokenClient } from '@genai/auth';
+import { DownstreamError } from '@genai/shared';
 import { Logger } from '@nestjs/common';
 import type { AssistantConfig } from '../config/config';
-import { DownstreamError } from '../clients/http-json-client';
 import type {
   GatewayClient,
   PromptClient,

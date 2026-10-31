@@ -1,4 +1,4 @@
-import type { HttpJsonClient } from './http-json-client';
+import type { HttpJsonClient } from '@genai/shared';
 
 export interface SearchHit {
   chunkId: string;

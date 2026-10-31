@@ -7,12 +7,12 @@ import {
   type OboTokenClient,
   type SecretProvider,
 } from '@genai/auth';
+import { HttpJsonClient } from '@genai/shared';
 import { Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { AskController } from './ask/ask.controller';
 import { AskExceptionFilter } from './ask/ask-exception.filter';
 import { AskService } from './ask/ask.service';
-import { HttpJsonClient } from './clients/http-json-client';
 import { GatewayClient, PromptClient, RetrievalClient } from './clients/service-clients';
 import { ASSISTANT_CONFIG, loadConfig, type AssistantConfig } from './config/config';
 import { HealthController } from './health.controller';

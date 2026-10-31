@@ -1,5 +1,5 @@
 import type { AuthenticatedPrincipal, OboTokenClient } from '@genai/auth';
-import { DownstreamError } from '../clients/http-json-client';
+import { DownstreamError } from '@genai/shared';
 import type { GatewayClient, PromptClient, RetrievalClient } from '../clients/service-clients';
 import { AskService, NO_SOURCES_ANSWER } from './ask.service';
 
