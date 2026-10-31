@@ -1,3 +1,4 @@
+import { TOKEN_VERIFIER, TestIssuer } from '@genai/auth';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -5,9 +6,13 @@ import { AppModule } from '../src/app.module';
 import { INGESTION_CONFIG, loadConfig } from '../src/config/config';
 import { IngestionWorker } from '../src/worker/ingestion-worker';
 
+const issuer = new TestIssuer();
+
 async function createApp(env: NodeJS.ProcessEnv = {}): Promise<INestApplication> {
   const config = loadConfig({ POLL_INTERVAL_MS: '0', CHUNK_MAX_CHARS: '200', ...env });
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+    .overrideProvider(TOKEN_VERIFIER)
+    .useValue(issuer.verifier())
     .overrideProvider(INGESTION_CONFIG)
     .useValue(config)
     .compile();
@@ -28,11 +33,15 @@ describe('ingestion API', () => {
     await app.close();
   });
 
-  const as = (tenant: string) => ({
-    get: (path: string) => request(app.getHttpServer()).get(path).set('x-tenant-id', tenant),
-    post: (path: string, body: object = {}) =>
-      request(app.getHttpServer()).post(path).set('x-tenant-id', tenant).send(body),
-  });
+  /** A caller authenticated with a signed token. Defaults to an ingestion admin of the tenant. */
+  const as = (tenant: string, roles: string[] = ['ingestion-admin']) => {
+    const bearer = `Bearer ${issuer.mint({ tenant, roles })}`;
+    return {
+      get: (path: string) => request(app.getHttpServer()).get(path).set('authorization', bearer),
+      post: (path: string, body: object = {}) =>
+        request(app.getHttpServer()).post(path).set('authorization', bearer).send(body),
+    };
+  };
 
   it('accepts a document (202), processes it in the background, and exposes the chunks', async () => {
     app = await createApp();
@@ -123,10 +132,42 @@ describe('ingestion API', () => {
 
     const big = await acme.post('/v1/documents', { ...doc, content: 'x'.repeat(51) }).expect(413);
     expect(big.body.error).toMatchObject({ code: 'document_too_large', maxBytes: 50 });
+  });
 
-    expect((await as('Bad Tenant!').post('/v1/documents', doc).expect(400)).body.error.code).toBe(
-      'invalid_tenant',
-    );
+  it('requires a valid token, and takes the tenant from it rather than from a header', async () => {
+    app = await createApp();
+    const accepted = await as('acme').post('/v1/documents', doc).expect(202);
+
+    await request(app.getHttpServer()).get('/v1/dead-letters').expect(401);
+    await request(app.getHttpServer())
+      .post('/v1/documents')
+      .set('authorization', `Bearer ${issuer.mint({ tenant: 'acme', expiresInSec: -999 })}`)
+      .send(doc)
+      .expect(401);
+    await request(app.getHttpServer())
+      .post('/v1/documents')
+      .set('authorization', `Bearer ${issuer.mint({ tenant: 'Not A Tenant!' })}`)
+      .send(doc)
+      .expect(401);
+
+    // Spoof attempt: globex's token plus an x-tenant-id naming acme still cannot see acme's job.
+    await request(app.getHttpServer())
+      .get(`/v1/ingestions/${accepted.body.jobId}`)
+      .set('authorization', `Bearer ${issuer.mint({ tenant: 'globex' })}`)
+      .set('x-tenant-id', 'acme')
+      .expect(404);
+  });
+
+  it('lets members submit and read their jobs, but only ingestion-admins see dead letters', async () => {
+    app = await createApp();
+    const member = as('acme', ['analyst']);
+    const accepted = await member.post('/v1/documents', doc).expect(202);
+    await app.get(IngestionWorker).drain();
+
+    await member.get(`/v1/ingestions/${accepted.body.jobId}`).expect(200);
+    await member.get('/v1/documents/handbook').expect(200);
+    expect((await member.get('/v1/dead-letters').expect(403)).body.error.code).toBe('forbidden');
+    await member.post(`/v1/dead-letters/${accepted.body.jobId}/requeue`).expect(403);
   });
 
   it('processes documents automatically when the background poller is enabled', async () => {

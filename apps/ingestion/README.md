@@ -37,23 +37,29 @@ Anything else (for example `.pdf`) is dead-lettered with `Unsupported file type`
 ```bash
 npm install
 npm run build
+eval "$(npm run -s dev-token -w @genai/auth -- env)"   # trust locally minted dev tokens
 PORT=3002 node apps/ingestion/dist/main.js
 ```
 
 ```bash
+# a member token (submit, read) and an admin token (dead letters)
+MEMBER=$(npm run -s dev-token -w @genai/auth -- mint --tenant acme-bank --roles analyst)
+
 # submit a document (returns 202 and a jobId)
 curl -s -X POST localhost:3002/v1/documents \
-  -H 'content-type: application/json' -H 'x-tenant-id: acme-bank' \
+  -H 'content-type: application/json' -H "authorization: Bearer $MEMBER" \
   -d '{"documentId":"faq","filename":"faq.md","content":"# Refunds\nRefunds take five days."}'
 
 # check the job, then read the chunks
-curl -s localhost:3002/v1/ingestions/<jobId> -H 'x-tenant-id: acme-bank'
-curl -s localhost:3002/v1/documents/faq/chunks -H 'x-tenant-id: acme-bank'
+curl -s localhost:3002/v1/ingestions/<jobId> -H "authorization: Bearer $MEMBER"
+curl -s localhost:3002/v1/documents/faq/chunks -H "authorization: Bearer $MEMBER"
 ```
 
 ## API
 
-All routes need `x-tenant-id` (interim; replaced by token claims in Step 6).
+All routes need `Authorization: Bearer <JWT>`; the tenant comes from the verified token (see
+[ADR 0007](../../docs/adr/0007-authentication-and-authorization.md)). Members can submit documents
+and read their jobs and chunks. Listing and requeueing dead letters needs the `ingestion-admin` role.
 
 | Method | Path                               | Purpose                                          |
 | ------ | ---------------------------------- | ------------------------------------------------ |
@@ -68,7 +74,9 @@ Job statuses: `queued`, `processing`, `succeeded`, `unchanged`, `failed` (dead-l
 
 | Status | `error.code`                                                   |
 | ------ | -------------------------------------------------------------- |
-| 400    | `invalid_tenant`, `invalid_request`                            |
+| 400    | `invalid_request`                                              |
+| 401    | `unauthorized` (missing, expired or invalid token)             |
+| 403    | `forbidden` (dead letters need `ingestion-admin`)              |
 | 404    | `job_not_found`, `document_not_found`, `dead_letter_not_found` |
 | 413    | `document_too_large`                                           |
 
