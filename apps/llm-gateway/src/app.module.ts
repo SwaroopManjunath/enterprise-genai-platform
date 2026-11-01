@@ -7,9 +7,12 @@ import {
 import { Logger, Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { loadConfig, type GatewayConfig } from './config/config';
+import { COST_TRACKER, InMemoryCostTracker } from './cost/cost-tracker';
+import { PRICE_BOOK, PriceBook, usdToMicro } from './cost/pricing';
 import { GatewayController } from './gateway/gateway.controller';
 import { GatewayExceptionFilter } from './gateway/gateway-exception.filter';
-import { GatewayService } from './gateway/gateway.service';
+import { DAILY_BUDGET, GatewayService } from './gateway/gateway.service';
+import { UsageController } from './gateway/usage.controller';
 import { HealthController } from './health.controller';
 import { InMemoryTokenBucketRateLimiter, RATE_LIMITER } from './limits/rate-limiter';
 import { InMemoryTokenQuota, TOKEN_QUOTA } from './limits/token-quota';
@@ -33,7 +36,7 @@ async function buildProviders(
 }
 
 @Module({
-  controllers: [HealthController, GatewayController],
+  controllers: [HealthController, GatewayController, UsageController],
   providers: [
     { provide: GATEWAY_CONFIG, useFactory: () => loadConfig() },
     // Env-backed locally. In Azure, wire KeyVaultSecretProvider with a managed identity here.
@@ -63,6 +66,18 @@ async function buildProviders(
           logger.warn(`deployment failed: ${e.message}`),
         );
       },
+    },
+    {
+      provide: PRICE_BOOK,
+      inject: [GATEWAY_CONFIG],
+      useFactory: (c: GatewayConfig) => new PriceBook(c.prices),
+    },
+    { provide: COST_TRACKER, useFactory: () => new InMemoryCostTracker() },
+    {
+      provide: DAILY_BUDGET,
+      inject: [GATEWAY_CONFIG],
+      useFactory: (c: GatewayConfig) =>
+        c.dailyCostBudgetUsd === undefined ? undefined : usdToMicro(c.dailyCostBudgetUsd),
     },
     GatewayService,
     { provide: APP_FILTER, useClass: GatewayExceptionFilter },

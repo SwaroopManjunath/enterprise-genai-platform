@@ -4,12 +4,13 @@ import type { Response } from 'express';
 import { ZodError } from 'zod';
 import { ProviderError } from '../llm/provider-error';
 import { AllProvidersFailedError } from '../resilience/llm-router';
-import { QuotaExceededError, RateLimitedError } from './errors';
+import { BudgetExceededError, QuotaExceededError, RateLimitedError } from './errors';
 
 /** Maps domain errors to stable HTTP responses: `{ error: { code, message } }`. */
 @Catch(
   RateLimitedError,
   QuotaExceededError,
+  BudgetExceededError,
   AllProvidersFailedError,
   ProviderError,
   InvalidTenantError,
@@ -31,6 +32,9 @@ export class GatewayExceptionFilter implements ExceptionFilter {
         limit: error.limit,
         used: error.used,
       });
+    }
+    if (error instanceof BudgetExceededError) {
+      return void send(429, 'budget_exceeded', error.message);
     }
     if (error instanceof AllProvidersFailedError) {
       return void send(503, 'upstream_unavailable', 'All LLM deployments are unavailable');

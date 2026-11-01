@@ -14,3 +14,13 @@ export class QuotaExceededError extends Error {
     this.name = 'QuotaExceededError';
   }
 }
+
+export class BudgetExceededError extends Error {
+  constructor(
+    readonly budgetMicroUsd: number,
+    readonly spentMicroUsd: number,
+  ) {
+    super('Daily cost budget exceeded');
+    this.name = 'BudgetExceededError';
+  }
+}

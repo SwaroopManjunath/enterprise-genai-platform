@@ -16,6 +16,11 @@ const deploymentSchema = z
     message: 'set exactly one of apiKey or apiKeySecret',
   });
 
+const priceSchema = z.object({
+  inputPerMTok: z.number().nonnegative(),
+  outputPerMTok: z.number().nonnegative(),
+});
+
 export type AzureDeploymentConfig = z.infer<typeof deploymentSchema>;
 
 /** A deployment whose credential has been looked up, ready to call. */
@@ -39,6 +44,13 @@ const envSchema = z.object({
   RETRY_MAX_DELAY_MS: z.coerce.number().int().min(0).default(5_000),
   DEFAULT_REQUESTS_PER_MINUTE: z.coerce.number().int().positive().default(60),
   DEFAULT_DAILY_TOKEN_QUOTA: z.coerce.number().int().positive().default(1_000_000),
+  /**
+   * JSON object: deployment label -> `{ inputPerMTok, outputPerMTok }` in US dollars per million
+   * tokens. A deployment missing here is served but reported as unpriced.
+   */
+  MODEL_PRICES: z.string().default('{}'),
+  /** Optional daily spend cap per tenant, in US dollars. Unset means no cap beyond the token quota. */
+  DAILY_COST_BUDGET_USD: z.coerce.number().positive().optional(),
 });
 
 export interface GatewayConfig {
@@ -48,6 +60,9 @@ export interface GatewayConfig {
   upstreamTimeoutMs: number;
   retry: { maxAttempts: number; baseDelayMs: number; maxDelayMs: number };
   limits: { requestsPerMinute: number; dailyTokenQuota: number };
+  prices: Record<string, { inputPerMTok: number; outputPerMTok: number }>;
+  /** Daily spend cap per tenant in US dollars, when one is set. */
+  dailyCostBudgetUsd?: number;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): GatewayConfig {
@@ -65,6 +80,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): GatewayConfig 
     throw new Error('LLM_PROVIDER=azure requires at least one entry in AZURE_OPENAI_DEPLOYMENTS');
   }
 
+  let rawPrices: unknown;
+  try {
+    rawPrices = JSON.parse(parsed.MODEL_PRICES);
+  } catch {
+    throw new Error('MODEL_PRICES must be valid JSON');
+  }
+  const prices = z.record(z.string(), priceSchema).parse(rawPrices);
+
   return {
     port: parsed.PORT,
     provider: parsed.LLM_PROVIDER,
@@ -79,5 +102,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): GatewayConfig 
       requestsPerMinute: parsed.DEFAULT_REQUESTS_PER_MINUTE,
       dailyTokenQuota: parsed.DEFAULT_DAILY_TOKEN_QUOTA,
     },
+    prices,
+    ...(parsed.DAILY_COST_BUDGET_USD !== undefined && {
+      dailyCostBudgetUsd: parsed.DAILY_COST_BUDGET_USD,
+    }),
   };
 }
