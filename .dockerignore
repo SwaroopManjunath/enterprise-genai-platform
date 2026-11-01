@@ -1,0 +1,21 @@
+# Keep the build context small and free of anything that must not end up in an image.
+.git
+.github
+**/node_modules
+**/dist
+**/coverage
+**/*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.dev-keys
+tests/**
+!tests/e2e/package.json
+!tests/evals/package.json
+docs
+ops
+deploy
+infra
+*.md
+.husky
+.DS_Store
