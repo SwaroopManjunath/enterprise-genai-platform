@@ -75,6 +75,8 @@ function clean(span: ReadableSpan): ReadableSpan {
   return Object.create(span, {
     attributes: { value: attributes },
     events: { value: [] },
+    // a status message is free text, so only the code survives
+    status: { value: { code: span.status.code } },
     // a link's attributes are dropped for the same reason
     links: { value: span.links.map((l) => ({ context: l.context, attributes: {} })) },
   }) as ReadableSpan;

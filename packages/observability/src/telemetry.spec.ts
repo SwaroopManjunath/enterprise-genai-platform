@@ -114,11 +114,13 @@ describe('spans', () => {
       span.setAttribute('genai.note', 'Refunds take five working days.');
       span.addEvent('debug', { text: 'Refunds take five working days.' });
       span.recordException(new Error('Refunds take five working days.'));
+      span.setStatus({ code: 2, message: 'Refunds take five working days.' });
     });
 
     const [span] = memory.spans();
     expect(span?.attributes).toEqual({ 'genai.outcome': 'ok' });
     expect(span?.events).toEqual([]);
+    expect(span?.status).toEqual({ code: 2 });
     expect(JSON.stringify(span?.attributes)).not.toContain('Refunds');
   });
 });
