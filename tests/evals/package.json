@@ -1,0 +1,27 @@
+{
+  "name": "@genai/evals",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Evaluation pipeline: scores retrieval, groundedness, citations and abstention on a labelled dataset, and fails the build when quality drops.",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "jest",
+    "eval": "ts-node src/cli.ts",
+    "eval:selftest": "ts-node src/cli.ts --self-test",
+    "eval:baseline": "ts-node src/cli.ts --update-baseline"
+  },
+  "dependencies": {
+    "@genai/auth": "0.1.0",
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/platform-express": "^11.0.0",
+    "@nestjs/testing": "^11.0.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@genai/shared": "0.1.0",
+    "ts-node": "^10.9.2"
+  }
+}
