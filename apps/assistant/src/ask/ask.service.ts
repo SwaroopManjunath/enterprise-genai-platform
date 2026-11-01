@@ -132,6 +132,9 @@ interface Completion {
   firstTokenMs?: number;
 }
 
+/** Milliseconds to one decimal place: precise enough to compare, short enough to read. */
+const ms = (value: number): number => Math.round(value * 10) / 10;
+
 /** When a stream ended without the gateway's own count: about four characters to a token. */
 function estimateUsage(
   messages: readonly { content: string }[],
@@ -387,7 +390,7 @@ export class AskService {
             question: question.report,
             sources: screened.report,
           },
-          timings: { totalMs: this.clock() - startedAt, retrievalMs },
+          timings: { totalMs: ms(this.clock() - startedAt), retrievalMs: ms(retrievalMs) },
         },
       };
     }
@@ -439,7 +442,7 @@ export class AskService {
             savedTokens: tokens,
             savedMicroUsd: costMicroUsd,
           },
-          timings: { totalMs: this.clock() - startedAt, retrievalMs },
+          timings: { totalMs: ms(this.clock() - startedAt), retrievalMs: ms(retrievalMs) },
         },
       };
     }
@@ -497,10 +500,10 @@ export class AskService {
       },
     };
     const timings: Timings = {
-      totalMs: this.clock() - p.startedAt,
-      retrievalMs: p.retrievalMs,
-      modelMs: completion.modelMs,
-      ...(completion.firstTokenMs !== undefined && { firstTokenMs: completion.firstTokenMs }),
+      totalMs: ms(this.clock() - p.startedAt),
+      retrievalMs: ms(p.retrievalMs),
+      modelMs: ms(completion.modelMs),
+      ...(completion.firstTokenMs !== undefined && { firstTokenMs: ms(completion.firstTokenMs) }),
     };
     const tokens = completion.usage.totalTokens;
     const costMicroUsd = completion.cost?.microUsd ?? 0;

@@ -1,4 +1,4 @@
-import { seedDocuments, startStack, type Stack } from './stack';
+import { seedDocuments, startStack, withoutNoise, type Stack } from './stack';
 
 const analyst = { tenant: 'acme-bank', userId: 'bob', roles: ['analyst'] };
 const REFUNDS = 'How long do refunds take?';
@@ -104,7 +104,7 @@ describe('guardrails, enforcing: the attacks fail', () => {
     expect(res.body.grounded).toBe(true);
     expect(res.body.answer).toContain('[REDACTED:CARD]');
     expect(res.body.answer).toContain('[REDACTED:SECRET]');
-    expect(JSON.stringify(res.body)).not.toMatch(/4111|sk-abcdefgh/);
+    expect(JSON.stringify(withoutNoise(res.body))).not.toMatch(/4111|sk-abcdefgh/);
     expect(res.body.guardrails.output.redactions).toEqual(
       expect.arrayContaining([
         { type: 'secret', count: 1 },
