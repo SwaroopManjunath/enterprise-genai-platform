@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { join } from 'node:path';
 import { devEnvironment, loadOrCreateDevIssuer } from '../dev-keys';
-import { startDevTokenEndpoint } from '../dev-token-endpoint';
+import { readFileSync } from 'node:fs';
+import { parseDevClients, startDevTokenEndpoint } from '../dev-token-endpoint';
 
 const USAGE = `Local development tokens (NOT for production).
 
@@ -11,6 +12,10 @@ const USAGE = `Local development tokens (NOT for production).
   dev-token obo-server [--port 4000] [--client-id assistant] [--client-secret dev-secret]
                        [--audience api://assistant]
                                          stand-in for Entra's on-behalf-of token endpoint
+  dev-token idp --clients-file <json> [--port 4000] [--host 0.0.0.0]
+                                         the same stand-in for several services at once, listening
+                                         on a container network (a clients file maps each client id
+                                         to its secret, audience and optional roles)
 
 Keys live in ./.dev-keys (override with GENAI_DEV_KEYS_DIR). Example:
 
@@ -82,6 +87,21 @@ async function main(argv: string[]): Promise<void> {
       Number(f['port'] ?? 4000),
     );
     console.error(`dev OBO token endpoint for client "${clientId}": ${endpoint.url}`);
+    console.error('development only; press Ctrl-C to stop');
+    return;
+  }
+
+  if (command === 'idp') {
+    const f = flags(rest);
+    if (!f['clients-file']) throw new Error('--clients-file is required');
+    const clients = parseDevClients(readFileSync(f['clients-file'], 'utf8'));
+    const endpoint = await startDevTokenEndpoint(
+      { issuer: dev.issuer, clients },
+      Number(f['port'] ?? 4000),
+      f['host'] ?? '127.0.0.1',
+    );
+    console.error(`dev token endpoint for ${Object.keys(clients).join(', ')}: ${endpoint.url}`);
+    console.error(`public keys: ${dev.jwksPath}`);
     console.error('development only; press Ctrl-C to stop');
     return;
   }

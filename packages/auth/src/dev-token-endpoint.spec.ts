@@ -1,6 +1,10 @@
 import { EnvSecretProvider } from './secrets/env-secret-provider';
 import { EntraOboClient, type OboExchangeError } from './obo/obo-client';
-import { startDevTokenEndpoint, type RunningDevTokenEndpoint } from './dev-token-endpoint';
+import {
+  parseDevClients,
+  startDevTokenEndpoint,
+  type RunningDevTokenEndpoint,
+} from './dev-token-endpoint';
 import { AuthenticationError } from './principal';
 import { TestIssuer } from './test-issuer';
 
@@ -92,5 +96,43 @@ describe('dev token endpoint with the real OBO client', () => {
       clientWith('dev-secret').exchange(userToken(), 'https://evil.example/.default'),
     );
     expect(error.code).toBe('invalid_scope');
+  });
+});
+
+describe('parseDevClients', () => {
+  it('reads several services with their secrets, audiences and roles', () => {
+    expect(
+      parseDevClients(
+        JSON.stringify({
+          assistant: { secret: 's1', audience: 'api://assistant' },
+          ingestion: { secret: 's2', audience: 'api://ingestion', roles: ['indexer'] },
+        }),
+      ),
+    ).toEqual({
+      assistant: { secret: 's1', audience: 'api://assistant' },
+      ingestion: { secret: 's2', audience: 'api://ingestion', roles: ['indexer'] },
+    });
+  });
+
+  it.each([
+    ['not an object', '[]'],
+    ['a client with no secret', '{"a":{"audience":"api://a"}}'],
+    ['a client with an empty secret', '{"a":{"secret":"","audience":"api://a"}}'],
+    ['a client with no audience', '{"a":{"secret":"s"}}'],
+    ['roles that are not strings', '{"a":{"secret":"s","audience":"api://a","roles":[1]}}'],
+  ])('refuses %s', (_label, text) => {
+    expect(() => parseDevClients(text)).toThrow();
+  });
+
+  it('can listen on another address, for use inside a container network', async () => {
+    const endpoint = await startDevTokenEndpoint({ issuer, clients: {} }, 0, '0.0.0.0');
+    try {
+      const response = await fetch(endpoint.url, {
+        method: 'GET',
+      });
+      expect(response.status).toBe(405);
+    } finally {
+      await endpoint.close();
+    }
   });
 });
