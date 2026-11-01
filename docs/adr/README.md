@@ -18,6 +18,7 @@ what it costs us. They are immutable once accepted; a later ADR can supersede an
 | [0011](0011-agent-orchestrator.md)                   | Agent orchestrator                   | Accepted |
 | [0012](0012-mcp-gateway.md)                          | MCP gateway                          | Accepted |
 | [0013](0013-cost-and-performance.md)                 | Cost and performance                 | Accepted |
+| [0014](0014-evaluation-pipeline.md)                  | Evaluation pipeline                  | Accepted |
 
 New ADR: copy the structure of an existing one, take the next number, and add it to this table in
 the same PR as the change it justifies.
