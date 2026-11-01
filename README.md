@@ -5,12 +5,13 @@ microservices, an Azure OpenAI gateway with fallback, hybrid RAG on Azure AI Sea
 gateway, Entra ID (OIDC/JWT) auth, evaluation gates in CI, OpenTelemetry observability and AKS
 deployment.
 
-> **Honest status:** this is built step by step in the open. Five services, three shared libraries
+> **Honest status:** this is built step by step in the open. Six services, three shared libraries
 > and a cross-service end-to-end test are done, and one real path works end to end: **a document
 > admin uploads a file, it is ingested and indexed with its access list, and a user with a token asks
 > a question and gets a cited answer, seeing only what their role allows** (run it with
 > `npm run demo -w @genai/e2e`), with **guardrails** against prompt injection, PII leaks and prompt
-> leaks (pattern-based, with documented limits). It all runs on **local stand-ins**: an in-memory queue, index and
+> leaks (pattern-based, with documented limits), and an **agent** that uses tools as the user with
+> hard limits and a person's approval before any write. It all runs on **local stand-ins**: an in-memory queue, index and
 > stores, a deterministic **mock model** (not an LLM), and locally generated signing keys instead of
 > Entra ID. Nothing has been run against real Azure yet.
 > The diagram below is the **target**, colour-coded by what exists today.
@@ -19,22 +20,22 @@ deployment.
 
 ✅ Done · 🚧 In progress · 📋 Planned
 
-| Area                 | Status     | What exists today                                                                                                      | Still stubbed or missing                                                         |
-| -------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Monorepo, CI, ADRs   | ✅ Done    | npm workspaces, strict TS, lint/format, commit hooks, GitHub Actions                                                   | -                                                                                |
-| LLM gateway          | ✅ Done    | Rate limits, token quotas, retries, fallback, error mapping                                                            | Azure client untested against real Azure; no cache                               |
-| Prompt registry      | ✅ Done    | Versions, audited rollback, sticky A/B, safe templates                                                                 | In-memory storage (no Cosmos DB yet)                                             |
-| Ingestion pipeline   | ✅ Done    | Queue with DLQ, chunking per file type, idempotent; **writes to search with access lists** as its own service identity | In-memory queue; no PDF/Office, no delete; 200 KB limit                          |
-| Retrieval service    | ✅ Done    | BM25 + vector, rank fusion, rerank, role/tenant trimming                                                               | Hash embedder (spelling, not meaning); in-memory                                 |
-| Auth (Entra ID)      | ✅ Done    | JWT validation, secure-by-default guard, role gates, OBO client                                                        | Not run against real Entra ID; OBO and Key Vault not wired yet                   |
-| **Vertical slice**   | ✅ Done    | Upload, ingest, index, then ask: `assistant` acts as the user, verifies citations; e2e over real HTTP                  | Mock model (deterministic test double); nothing on real Azure                    |
-| Guardrails           | ✅ Done    | PII/secret redaction, injection detection, canary and output checks; enforce or monitor mode                           | Pattern-based: misses paraphrase, other languages, split attacks; assistant only |
-| Agent orchestrator   | 📋 Planned | -                                                                                                                      | Tool calling, step limits, human approval                                        |
-| MCP gateway          | 📋 Planned | -                                                                                                                      | Server registry, permissions, audit log                                          |
-| Cost and performance | 📋 Planned | Per-tenant token quota in the gateway                                                                                  | Semantic cache, cost tracking, streaming                                         |
-| Evaluation pipeline  | 📋 Planned | -                                                                                                                      | Groundedness/relevance gates that block deploys                                  |
-| Observability        | 📋 Planned | -                                                                                                                      | OpenTelemetry traces, SLO dashboards, alerts                                     |
-| Delivery             | 📋 Planned | -                                                                                                                      | Docker, Helm, AKS, canary rollout, Bicep/Terraform                               |
+| Area                 | Status     | What exists today                                                                                                          | Still stubbed or missing                                                         |
+| -------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Monorepo, CI, ADRs   | ✅ Done    | npm workspaces, strict TS, lint/format, commit hooks, GitHub Actions                                                       | -                                                                                |
+| LLM gateway          | ✅ Done    | Rate limits, token quotas, retries, fallback, error mapping                                                                | Azure client untested against real Azure; no cache                               |
+| Prompt registry      | ✅ Done    | Versions, audited rollback, sticky A/B, safe templates                                                                     | In-memory storage (no Cosmos DB yet)                                             |
+| Ingestion pipeline   | ✅ Done    | Queue with DLQ, chunking per file type, idempotent; **writes to search with access lists** as its own service identity     | In-memory queue; no PDF/Office, no delete; 200 KB limit                          |
+| Retrieval service    | ✅ Done    | BM25 + vector, rank fusion, rerank, role/tenant trimming                                                                   | Hash embedder (spelling, not meaning); in-memory                                 |
+| Auth (Entra ID)      | ✅ Done    | JWT validation, secure-by-default guard, role gates, OBO client                                                            | Not run against real Entra ID; OBO and Key Vault not wired yet                   |
+| **Vertical slice**   | ✅ Done    | Upload, ingest, index, then ask: `assistant` acts as the user, verifies citations; e2e over real HTTP                      | Mock model (deterministic test double); nothing on real Azure                    |
+| Guardrails           | ✅ Done    | PII/secret redaction, injection detection, canary and output checks; enforce or monitor mode                               | Pattern-based: misses paraphrase, other languages, split attacks; assistant only |
+| Agent orchestrator   | ✅ Done    | Tool calls as the user, step/time/loop limits, owner approval before any write, audit trail; poisoned tool output screened | In-memory runs and stand-in tools; runs inside the request; owner-only approval  |
+| MCP gateway          | 📋 Planned | -                                                                                                                          | Server registry, permissions, audit log                                          |
+| Cost and performance | 📋 Planned | Per-tenant token quota in the gateway                                                                                      | Semantic cache, cost tracking, streaming                                         |
+| Evaluation pipeline  | 📋 Planned | -                                                                                                                          | Groundedness/relevance gates that block deploys                                  |
+| Observability        | 📋 Planned | -                                                                                                                          | OpenTelemetry traces, SLO dashboards, alerts                                     |
+| Delivery             | 📋 Planned | -                                                                                                                          | Docker, Helm, AKS, canary rollout, Bicep/Terraform                               |
 
 ## Architecture (target)
 
@@ -61,9 +62,9 @@ flowchart LR
     classDef done fill:#d1fae5,stroke:#059669,color:#064e3b;
     classDef stub fill:#fef3c7,stroke:#d97706,color:#78350f;
     classDef planned fill:#f3f4f6,stroke:#9ca3af,stroke-dasharray:4 3,color:#374151;
-    class AS,GW,PR,ING,RET done;
+    class AS,GW,PR,ING,RET,AG done;
     class AIS,SB,AOAI1,AOAI2 stub;
-    class Client,AG,MCP,COS planned;
+    class Client,MCP,COS planned;
 ```
 
 ## Proof: tests and a real run
@@ -74,6 +75,7 @@ Everything below was produced by running the code in this repository.
 
 | Package                              | Tests   |
 | ------------------------------------ | ------- |
+| `@genai/agents`                      | 101     |
 | `@genai/assistant`                   | 57      |
 | `@genai/llm-gateway`                 | 56      |
 | `@genai/prompt-registry`             | 59      |
@@ -82,15 +84,20 @@ Everything below was produced by running the code in this repository.
 | `@genai/auth`                        | 70      |
 | `@genai/guardrails`                  | 90      |
 | `@genai/shared`                      | 17      |
-| `@genai/e2e` (all services together) | 36      |
-| **Total**                            | **540** |
+| `@genai/e2e` (all services together) | 52      |
+| **Total**                            | **657** |
 
 Format check, lint, typecheck and build also pass in CI. Many are end-to-end HTTP tests (failure
-injection, tenant isolation, access trimming, forged and expired tokens, spoofed headers). The 36
+injection, tenant isolation, access trimming, forged and expired tokens, spoofed headers). The 52
 `e2e` tests start the real services on real ports and talk to them over HTTP. To check those tests
 can actually fail, the code was deliberately broken in seven ways (access trimming, dropping the
 access list on upload, ignoring access in the "unchanged" check, and four guardrails): each breakage
-was caught by the scenarios written for it, and everything passed again when restored.
+was caught by the scenarios written for it, and everything passed again when restored. The agent
+orchestrator was broken in eight further ways (approval before a write, step budget, loop detection,
+screening of tool output, the role re-check at approval, the owner check, the store's compare-and-swap,
+and which tools the model is shown): each fails or hangs the tests written for it. Running the demo
+against a poisoned document also exposed a real bug (JSON-escaping hid an injected instruction from the
+detector); it is fixed and has a regression test that fails without the fix.
 
 **A real run** (`npm run -s demo -w @genai/e2e`): documents are uploaded through the ingestion
 service, then the same question is asked by callers with different roles. Abridged:
@@ -146,6 +153,33 @@ Alice presents a token issued for the retrieval API to the assistant
   -> HTTP 401 unauthorized (tokens are bound to one service)
 ```
 
+The last section of the demo runs the **agent** through the same services (the model is scripted, so
+the output is exact):
+
+```text
+The agent can only read what its user can read:
+  Bob's agent did not see the manager-only document
+  Alice's agent FOUND the manager-only document
+
+Dana (support lead) asks the agent to email a customer. Sending needs her approval:
+  run: awaiting_approval, 1 model step(s)
+    waiting for approval of c1: Send an email to jo@acme-bank.example with subject "Your refund"
+    emails sent so far: 0
+  after Dana approves: completed, 2 model step(s)
+    emails sent: 1
+  approving a second time -> HTTP 409 invalid_decision (still 1 email)
+  a colleague trying to approve -> HTTP 403 not_run_owner
+
+A model that never stops, with a budget of 4 steps:
+  run: failed (step_limit), 4 model step(s)
+    model calls made: 4
+
+A model that obeys whatever it reads, searching documents that include a poisoned one:
+  run: completed, 2 model step(s)
+    answer: Refunds take five working days.
+    a tool result was withheld: it contained instructions
+```
+
 The model here is a deterministic stand-in, so what this proves is the **path and the access
 control**, not answer quality. Bob never sees the restricted documents and the model is not even
 called for him; tightening a document's access takes effect on the next upload even when its text is
@@ -159,6 +193,7 @@ reveal what the asking user may already read.
 
 | Path                   | Purpose                                                                                                        |
 | ---------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `apps/agents`          | Tool-using agent with limits and approval before writes ([docs](apps/agents/README.md))                        |
 | `apps/assistant`       | Ask a question, get a cited answer, as the user ([docs](apps/assistant/README.md))                             |
 | `apps/llm-gateway`     | Azure OpenAI gateway: limits, retries, fallback ([docs](apps/llm-gateway/README.md))                           |
 | `apps/prompt-registry` | Versioned prompts, rollback, A/B ([docs](apps/prompt-registry/README.md))                                      |
@@ -218,7 +253,10 @@ building the remaining pieces, so there is always a demonstrable system.
 - [x] **Step 8: Guardrails.** PII and secret redaction, prompt-injection detection with test
       corpora, canary and output checks, document quarantine, enforce and monitor (shadow) modes,
       proven against a gullible test model (ADR 0010)
-- [ ] **Step 9: Agent orchestrator.** Tool calling, step limits, timeouts, human approval
+- [x] **Step 9: Agent orchestrator.** `agents` service: tool calls as the user, strict JSON model
+      protocol, step budget, deadline, timeouts and loop detection, role-gated tools, owner
+      approval before any write (exactly once, re-checked at approval), tool output screened as
+      untrusted, audit trail; proven with misbehaving models across the real services (ADR 0011)
 - [ ] **Step 10: MCP gateway.** Server registry, permissions, audit logs
 - [ ] **Step 11: Cost and performance.** Semantic cache, per-tenant cost tracking, streaming
 - [ ] **Step 12: Evaluation pipeline.** Groundedness/relevance gates that block deploys
