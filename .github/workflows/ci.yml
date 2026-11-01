@@ -37,3 +37,21 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm test
+
+      # Quality gate: the system is run against a labelled dataset and the build fails if answers
+      # get worse (see tests/evals/README.md). The report is also shown on the run's summary page.
+      - name: Evaluation gate
+        run: npm run eval -w @genai/evals
+
+      # The gate itself must be able to fail: each known regression is played back and must be caught.
+      - name: Evaluation gate self-test
+        run: npm run eval:selftest -w @genai/evals
+
+      - name: Keep the evaluation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluation-report
+          path: tests/evals/results/
+          if-no-files-found: ignore
+          retention-days: 30

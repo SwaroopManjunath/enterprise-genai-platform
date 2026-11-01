@@ -31,6 +31,16 @@ npm install        # also installs git hooks
 npm run lint && npm run typecheck && npm test
 ```
 
+## Quality gate
+
+`npm run eval` runs the system against a labelled dataset and fails if answers get worse; CI runs it on
+every pull request. If you change a prompt, retrieval, chunking, a guardrail or the model, run it
+before you push. A change that improves things should also refresh the baseline
+(`npm run eval:baseline`) in the same pull request, which is reviewed like code because it is what
+quality may not fall below. A pull request that loosens a threshold, edits the dataset or lowers the
+baseline needs a reviewer to agree, and the description should say why. See
+[tests/evals](tests/evals/README.md).
+
 ## Definition of done
 
 Tests for new behavior, docs updated, no secrets in the diff, and an ADR for any decision that
