@@ -1,3 +1,5 @@
+import { parseSse, type SseMessage } from './sse';
+
 /** A call to another service failed. `kind` says how; `status` and `code` come from its response. */
 export class DownstreamError extends Error {
   constructor(
@@ -66,7 +68,7 @@ export class HttpJsonClient {
     body?: unknown,
     headers: Record<string, string> = {},
   ): Promise<T> {
-    const { service, baseUrl, timeoutMs } = this.options;
+    const { baseUrl, timeoutMs } = this.options;
 
     let response: Response;
     try {
@@ -81,23 +83,91 @@ export class HttpJsonClient {
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (error) {
-      // Match on the name, not `instanceof`: the timeout error can come from another realm.
-      const timedOut = (error as { name?: unknown } | null)?.name === 'TimeoutError';
-      throw new DownstreamError(service, timedOut ? 'timeout' : 'unreachable');
+      throw this.transportError(error);
     }
 
-    if (!response.ok) {
-      const parsed = (await response.json().catch(() => ({}))) as { error?: { code?: unknown } };
-      const code = typeof parsed.error?.code === 'string' ? parsed.error.code : undefined;
-      const retryAfter = Number(response.headers.get('retry-after'));
-      throw new DownstreamError(
-        service,
-        'http',
-        response.status,
-        code,
-        Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined,
-      );
-    }
+    if (!response.ok) throw await this.httpError(response);
     return (await response.json()) as T;
+  }
+
+  /**
+   * A POST whose answer arrives as server-sent events. The timeout bounds waiting for the response
+   * to begin, and then each silence between events, not the whole answer, so a long answer is not
+   * cut for being long. An error status before the first event is a DownstreamError exactly as for
+   * `post`. Abort `signal` to hang up: the connection closes and the server stops generating.
+   */
+  async *postEventStream(
+    path: string,
+    token: string,
+    body: unknown,
+    headers: Record<string, string> = {},
+    signal?: AbortSignal,
+  ): AsyncGenerator<SseMessage, void, void> {
+    const { service, baseUrl, timeoutMs } = this.options;
+    const controller = new AbortController();
+    const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+    let timedOut = false;
+    let idle: NodeJS.Timeout | undefined;
+    const arm = () => {
+      clearTimeout(idle);
+      idle = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, timeoutMs);
+    };
+
+    arm();
+    try {
+      let response: Response;
+      try {
+        response = await this.fetchImpl(`${baseUrl.replace(/\/+$/, '')}${path}`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            accept: 'text/event-stream',
+            authorization: `Bearer ${token}`,
+            ...headers,
+          },
+          body: JSON.stringify(body),
+          signal: combined,
+        });
+      } catch (error) {
+        throw timedOut ? new DownstreamError(service, 'timeout') : this.transportError(error);
+      }
+      if (!response.ok) throw await this.httpError(response);
+      if (!response.body) throw new DownstreamError(service, 'unreachable');
+
+      try {
+        for await (const message of parseSse(response.body)) {
+          arm();
+          yield message;
+        }
+      } catch (error) {
+        if (signal?.aborted) return; // the caller hung up: not a failure
+        throw timedOut ? new DownstreamError(service, 'timeout') : this.transportError(error);
+      }
+    } finally {
+      clearTimeout(idle);
+      controller.abort();
+    }
+  }
+
+  private transportError(error: unknown): DownstreamError {
+    // Match on the name, not `instanceof`: the timeout error can come from another realm.
+    const timedOut = (error as { name?: unknown } | null)?.name === 'TimeoutError';
+    return new DownstreamError(this.options.service, timedOut ? 'timeout' : 'unreachable');
+  }
+
+  private async httpError(response: Response): Promise<DownstreamError> {
+    const parsed = (await response.json().catch(() => ({}))) as { error?: { code?: unknown } };
+    const code = typeof parsed.error?.code === 'string' ? parsed.error.code : undefined;
+    const retryAfter = Number(response.headers.get('retry-after'));
+    return new DownstreamError(
+      this.options.service,
+      'http',
+      response.status,
+      code,
+      Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined,
+    );
   }
 }
