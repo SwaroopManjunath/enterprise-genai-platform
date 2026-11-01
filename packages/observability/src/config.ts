@@ -11,6 +11,8 @@ export interface TelemetryOptions {
   otlpEndpoint?: string;
   /** Port for a Prometheus scrape endpoint. Keep it off the public ingress. */
   metricsPort?: number;
+  /** Address the metrics endpoint listens on. All addresses by default: a scraper is another host. */
+  metricsHost?: string;
   /**
    * Secret that makes tenant and user pseudonyms. It must be the same in every service, or one
    * tenant looks like several. Without it each process makes its own, which is safe but uncorrelated.
@@ -42,6 +44,7 @@ export function optionsFromEnv(
     metrics: disabled ? 'off' : port !== undefined ? 'prometheus' : endpoint ? 'otlp' : 'off',
     ...(endpoint && { otlpEndpoint: endpoint }),
     ...(port !== undefined && { metricsPort: port }),
+    ...(env['METRICS_HOST'] && { metricsHost: env['METRICS_HOST'] }),
     ...(env['TELEMETRY_PSEUDONYM_SALT'] && { pseudonymSalt: env['TELEMETRY_PSEUDONYM_SALT'] }),
   };
 }

@@ -127,7 +127,12 @@ export function initTelemetry(options: TelemetryOptions): Telemetry {
     });
     readers.push(memoryReader);
   } else if (options.metrics === 'prometheus') {
-    readers.push(new PrometheusExporter({ port: options.metricsPort ?? 9464 }));
+    readers.push(
+      new PrometheusExporter({
+        host: options.metricsHost ?? '0.0.0.0',
+        port: options.metricsPort ?? 9464,
+      }),
+    );
   } else if (options.metrics === 'otlp') {
     readers.push(
       new PeriodicExportingMetricReader({
