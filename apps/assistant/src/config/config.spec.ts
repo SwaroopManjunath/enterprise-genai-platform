@@ -79,4 +79,17 @@ describe('loadConfig', () => {
       expect(() => loadConfig({ ...required, CACHE_SIMILARITY: '0.5' })).toThrow();
     });
   });
+
+  describe('streaming settings', () => {
+    const required = { OBO_TOKEN_ENDPOINT: 'http://x.test/token', OBO_CLIENT_ID: 'assistant' };
+
+    it('holds back 120 characters by default, and refuses a hold-back too small to be safe', () => {
+      expect(loadConfig(required).streamHoldbackChars).toBe(120);
+      expect(loadConfig({ ...required, STREAM_HOLDBACK_CHARS: '200' }).streamHoldbackChars).toBe(
+        200,
+      );
+      expect(() => loadConfig({ ...required, STREAM_HOLDBACK_CHARS: '10' })).toThrow();
+      expect(() => loadConfig({ ...required, STREAM_HOLDBACK_CHARS: '99999' })).toThrow();
+    });
+  });
 });
