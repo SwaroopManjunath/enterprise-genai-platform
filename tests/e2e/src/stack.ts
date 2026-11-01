@@ -60,6 +60,17 @@ export interface Caller {
   roles?: string[];
 }
 
+/**
+ * A response body without the fields that are different on every call: timings are long floats and
+ * the request id is a random UUID, so a test that looks for a digit pattern ("400", "4111", "150")
+ * in a whole response can match inside one by chance and fail at random.
+ */
+export const withoutNoise = (body: unknown): unknown => {
+  if (!body || typeof body !== 'object') return body;
+  const { timings: _timings, requestId: _requestId, ...rest } = body as Record<string, unknown>;
+  return rest;
+};
+
 export interface StreamedEvent {
   type: string;
   data: any; // eslint-disable-line @typescript-eslint/no-explicit-any

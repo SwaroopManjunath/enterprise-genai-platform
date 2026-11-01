@@ -1,4 +1,4 @@
-import { seedDocuments, startStack, type Stack } from './stack';
+import { seedDocuments, startStack, withoutNoise, type Stack } from './stack';
 
 const analyst = { tenant: 'acme-bank', userId: 'bob', roles: ['analyst'] };
 const manager = { tenant: 'acme-bank', userId: 'alice', roles: ['manager'] };
@@ -43,7 +43,7 @@ describe('upload -> ingest -> index -> ask, across the real services', () => {
     const asManager = await stack.ask(manager, TRAVEL_QUESTION);
 
     expect(asAnalyst.body).toMatchObject({ grounded: false, sourcesRetrieved: 0 });
-    expect(JSON.stringify(asAnalyst.body)).not.toMatch(/400|travel-policy/);
+    expect(JSON.stringify(withoutNoise(asAnalyst.body))).not.toMatch(/400|travel-policy/);
     expect(asManager.body.grounded).toBe(true);
     expect(asManager.body.answer).toMatch(/400 euros/);
   });
@@ -90,7 +90,7 @@ describe('upload -> ingest -> index -> ask, across the real services', () => {
 
     expect(acme.body.answer).toMatch(/150 euros/);
     expect(globex.body.answer).toMatch(/90 euros/);
-    expect(JSON.stringify(globex.body)).not.toMatch(/150/);
+    expect(JSON.stringify(withoutNoise(globex.body))).not.toMatch(/150/);
   });
 
   describe('who may do what', () => {

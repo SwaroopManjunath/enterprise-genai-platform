@@ -1,4 +1,4 @@
-import { seedDocuments, startStack, type Stack } from './stack';
+import { seedDocuments, startStack, withoutNoise, type Stack } from './stack';
 
 const analyst = { tenant: 'acme-bank', userId: 'bob', roles: ['analyst'] };
 const manager = { tenant: 'acme-bank', userId: 'alice', roles: ['manager'] };
@@ -277,7 +277,9 @@ describe('streaming through the real services', () => {
     // the document really was quoted, and really was streamed in pieces: the redaction was exercised
     expect(streamed.done.answer).toMatch(/settlement card for refunds is/i);
     expect(streamed.events.filter((e) => e.type === 'delta').length).toBeGreaterThan(1);
-    for (const event of streamed.events) expect(JSON.stringify(event.data)).not.toContain('4111');
+    for (const event of streamed.events) {
+      expect(JSON.stringify(withoutNoise(event.data))).not.toContain('4111');
+    }
     expect(streamed.done.answer).not.toContain('4111');
   });
 
