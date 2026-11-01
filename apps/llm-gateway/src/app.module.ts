@@ -1,3 +1,4 @@
+import { TelemetryModule } from '@genai/observability';
 import {
   EnvSecretProvider,
   SECRET_PROVIDER,
@@ -36,6 +37,7 @@ async function buildProviders(
 }
 
 @Module({
+  imports: [TelemetryModule.forService('llm-gateway')],
   controllers: [HealthController, GatewayController, UsageController],
   providers: [
     { provide: GATEWAY_CONFIG, useFactory: () => loadConfig() },

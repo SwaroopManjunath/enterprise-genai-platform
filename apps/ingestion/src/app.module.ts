@@ -1,3 +1,4 @@
+import { TelemetryModule } from '@genai/observability';
 import {
   EntraClientCredentialsClient,
   EnvSecretProvider,
@@ -25,6 +26,7 @@ import { IngestionWorker } from './worker/ingestion-worker';
 import { WorkerLoop } from './worker/worker-loop';
 
 @Module({
+  imports: [TelemetryModule.forService('ingestion')],
   controllers: [HealthController, IngestionController],
   providers: [
     { provide: INGESTION_CONFIG, useFactory: () => loadConfig() },

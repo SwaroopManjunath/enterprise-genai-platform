@@ -14,6 +14,7 @@
   "dependencies": {
     "@genai/auth": "0.1.0",
     "@genai/guardrails": "0.1.0",
+    "@genai/observability": "0.1.0",
     "@genai/shared": "0.1.0",
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",

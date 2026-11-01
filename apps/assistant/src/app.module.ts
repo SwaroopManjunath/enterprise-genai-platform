@@ -1,3 +1,4 @@
+import { TelemetryModule } from '@genai/observability';
 import {
   EntraOboClient,
   EnvSecretProvider,
@@ -25,6 +26,7 @@ const http = (service: string, url: string, c: AssistantConfig): HttpJsonClient 
   new HttpJsonClient({ service, baseUrl: url, timeoutMs: c.downstreamTimeoutMs });
 
 @Module({
+  imports: [TelemetryModule.forService('assistant')],
   controllers: [HealthController, AskController, CacheController],
   providers: [
     { provide: ASSISTANT_CONFIG, useFactory: () => loadConfig() },

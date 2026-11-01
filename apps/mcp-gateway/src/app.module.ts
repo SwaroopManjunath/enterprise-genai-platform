@@ -1,3 +1,4 @@
+import { TelemetryModule } from '@genai/observability';
 import {
   EntraOboClient,
   EnvSecretProvider,
@@ -33,6 +34,7 @@ import {
 } from './store/stores';
 
 @Module({
+  imports: [TelemetryModule.forService('mcp-gateway')],
   controllers: [HealthController, ServersController, ToolsController, AuditController],
   providers: [
     { provide: MCP_GATEWAY_CONFIG, useFactory: () => loadConfig() },

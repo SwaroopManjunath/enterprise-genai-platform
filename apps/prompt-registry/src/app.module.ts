@@ -1,3 +1,4 @@
+import { TelemetryModule } from '@genai/observability';
 import { authProviders } from '@genai/auth';
 import { Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
@@ -9,6 +10,7 @@ import { RegistryController } from './registry/registry.controller';
 import { RegistryExceptionFilter } from './registry/registry-exception.filter';
 
 @Module({
+  imports: [TelemetryModule.forService('prompt-registry')],
   controllers: [HealthController, RegistryController],
   providers: [
     { provide: PROMPT_REPOSITORY, useClass: InMemoryPromptRepository },

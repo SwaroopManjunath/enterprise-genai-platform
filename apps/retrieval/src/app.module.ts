@@ -1,3 +1,4 @@
+import { TelemetryModule } from '@genai/observability';
 import { authProviders } from '@genai/auth';
 import { Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
@@ -15,6 +16,7 @@ import { RERANKER, type Reranker } from './rerank/reranker';
 import { SearchService } from './search/search.service';
 
 @Module({
+  imports: [TelemetryModule.forService('retrieval')],
   controllers: [HealthController, RetrievalController],
   providers: [
     { provide: RETRIEVAL_CONFIG, useFactory: () => loadConfig() },
