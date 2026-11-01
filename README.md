@@ -12,7 +12,7 @@ deployment.
 > `npm run demo -w @genai/e2e`), with **guardrails** against prompt injection, PII leaks and prompt
 > leaks (pattern-based, with documented limits), and an **agent** that uses tools as the user with
 > hard limits and a person's approval before any write, whose third-party tools come through an
-> **MCP gateway** (approved definitions, per-role access, an audit log), plus per-tenant **cost tracking**, a scoped **answer cache** (it can never hand one person another person's answer) and **guarded streaming**, and an **evaluation gate** that fails the build when answers get worse (every metric has a floor, a ratchet against a committed baseline, and a replay of known regressions that must each be caught). It all runs on **local stand-ins**: an in-memory queue, index and
+> **MCP gateway** (approved definitions, per-role access, an audit log), plus **observability** (one trace per request across services, SLO burn-rate alerts, and telemetry that is scanned for leaks), per-tenant **cost tracking**, a scoped **answer cache** (it can never hand one person another person's answer) and **guarded streaming**, and an **evaluation gate** that fails the build when answers get worse (every metric has a floor, a ratchet against a committed baseline, and a replay of known regressions that must each be caught). It all runs on **local stand-ins**: an in-memory queue, index and
 > stores, a deterministic **mock model** (not an LLM), and locally generated signing keys instead of
 > Entra ID. Nothing has been run against real Azure yet.
 > The diagram below is the **target**, colour-coded by what exists today.
@@ -21,22 +21,22 @@ deployment.
 
 ✅ Done · 🚧 In progress · 📋 Planned
 
-| Area                 | Status     | What exists today                                                                                                                                                                          | Still stubbed or missing                                                                       |
-| -------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| Monorepo, CI, ADRs   | ✅ Done    | npm workspaces, strict TS, lint/format, commit hooks, GitHub Actions                                                                                                                       | -                                                                                              |
-| LLM gateway          | ✅ Done    | Rate limits, token quotas, retries, fallback, error mapping                                                                                                                                | Azure client untested against real Azure; no cache                                             |
-| Prompt registry      | ✅ Done    | Versions, audited rollback, sticky A/B, safe templates                                                                                                                                     | In-memory storage (no Cosmos DB yet)                                                           |
-| Ingestion pipeline   | ✅ Done    | Queue with DLQ, chunking per file type, idempotent; **writes to search with access lists** as its own service identity                                                                     | In-memory queue; no PDF/Office, no delete; 200 KB limit                                        |
-| Retrieval service    | ✅ Done    | BM25 + vector, rank fusion, rerank, role/tenant trimming                                                                                                                                   | Hash embedder (spelling, not meaning); in-memory                                               |
-| Auth (Entra ID)      | ✅ Done    | JWT validation, secure-by-default guard, role gates, OBO client                                                                                                                            | Not run against real Entra ID; OBO and Key Vault not wired yet                                 |
-| **Vertical slice**   | ✅ Done    | Upload, ingest, index, then ask: `assistant` acts as the user, verifies citations; e2e over real HTTP                                                                                      | Mock model (deterministic test double); nothing on real Azure                                  |
-| Guardrails           | ✅ Done    | PII/secret redaction, injection detection, canary and output checks; enforce or monitor mode                                                                                               | Pattern-based: misses paraphrase, other languages, split attacks; assistant only               |
-| Agent orchestrator   | ✅ Done    | Tool calls as the user, step/time/loop limits, owner approval before any write, audit trail; poisoned tool output screened                                                                 | In-memory runs and stand-in tools; runs inside the request; owner-only approval                |
-| MCP gateway          | ✅ Done    | Default-deny registry, pinned tool definitions (a changed tool switches off), SSRF-safe egress, per-role access, audit log; the agent uses it                                              | In-memory registry and audit log; Streamable HTTP and tools only; per-process rate limit       |
-| Cost and performance | ✅ Done    | Priced calls and per-tenant spend with a daily budget; answer cache scoped to what the model was given (off/shadow/serve); streaming with the output checks intact                         | In-memory cache and spend; wording similarity, not a real embedding model; synthetic benchmark |
-| Evaluation pipeline  | ✅ Done    | 41 labelled cases through the real services; retrieval, groundedness (independent judge), citations, abstention, leaks; floors, a baseline ratchet, and 8 replayed regressions; runs in CI | Scores calibrated to the stand-in model; small dataset; lexical judge                          |
-| Observability        | 📋 Planned | -                                                                                                                                                                                          | OpenTelemetry traces, SLO dashboards, alerts                                                   |
-| Delivery             | 📋 Planned | -                                                                                                                                                                                          | Docker, Helm, AKS, canary rollout, Bicep/Terraform                                             |
+| Area                 | Status     | What exists today                                                                                                                                                                                     | Still stubbed or missing                                                                       |
+| -------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Monorepo, CI, ADRs   | ✅ Done    | npm workspaces, strict TS, lint/format, commit hooks, GitHub Actions                                                                                                                                  | -                                                                                              |
+| LLM gateway          | ✅ Done    | Rate limits, token quotas, retries, fallback, error mapping                                                                                                                                           | Azure client untested against real Azure; no cache                                             |
+| Prompt registry      | ✅ Done    | Versions, audited rollback, sticky A/B, safe templates                                                                                                                                                | In-memory storage (no Cosmos DB yet)                                                           |
+| Ingestion pipeline   | ✅ Done    | Queue with DLQ, chunking per file type, idempotent; **writes to search with access lists** as its own service identity                                                                                | In-memory queue; no PDF/Office, no delete; 200 KB limit                                        |
+| Retrieval service    | ✅ Done    | BM25 + vector, rank fusion, rerank, role/tenant trimming                                                                                                                                              | Hash embedder (spelling, not meaning); in-memory                                               |
+| Auth (Entra ID)      | ✅ Done    | JWT validation, secure-by-default guard, role gates, OBO client                                                                                                                                       | Not run against real Entra ID; OBO and Key Vault not wired yet                                 |
+| **Vertical slice**   | ✅ Done    | Upload, ingest, index, then ask: `assistant` acts as the user, verifies citations; e2e over real HTTP                                                                                                 | Mock model (deterministic test double); nothing on real Azure                                  |
+| Guardrails           | ✅ Done    | PII/secret redaction, injection detection, canary and output checks; enforce or monitor mode                                                                                                          | Pattern-based: misses paraphrase, other languages, split attacks; assistant only               |
+| Agent orchestrator   | ✅ Done    | Tool calls as the user, step/time/loop limits, owner approval before any write, audit trail; poisoned tool output screened                                                                            | In-memory runs and stand-in tools; runs inside the request; owner-only approval                |
+| MCP gateway          | ✅ Done    | Default-deny registry, pinned tool definitions (a changed tool switches off), SSRF-safe egress, per-role access, audit log; the agent uses it                                                         | In-memory registry and audit log; Streamable HTTP and tools only; per-process rate limit       |
+| Cost and performance | ✅ Done    | Priced calls and per-tenant spend with a daily budget; answer cache scoped to what the model was given (off/shadow/serve); streaming with the output checks intact                                    | In-memory cache and spend; wording similarity, not a real embedding model; synthetic benchmark |
+| Evaluation pipeline  | ✅ Done    | 41 labelled cases through the real services; retrieval, groundedness (independent judge), citations, abstention, leaks; floors, a baseline ratchet, and 8 replayed regressions; runs in CI            | Scores calibrated to the stand-in model; small dataset; lexical judge                          |
+| Observability        | ✅ Done    | One trace across services (W3C `traceparent`), request and domain metrics, JSON logs; a privacy allowlist and a canary scan; 6 SLOs with burn-rate alerts, generated rules and dashboard, 10 runbooks | No collector, Prometheus or Grafana running yet; targets reasoned, not measured                |
+| Delivery             | 📋 Planned | -                                                                                                                                                                                                     | Docker, Helm, AKS, canary rollout, Bicep/Terraform                                             |
 
 ## Architecture (target)
 
@@ -59,13 +59,14 @@ flowchart LR
     GW --> AOAI1[Azure OpenAI primary]
     GW -. fallback .-> AOAI2[Azure OpenAI secondary]
     GW --> COS[(Cosmos DB)]
+    AS & GW & RET & ING & AG & MCP & PR -. OTLP and /metrics .-> OBS[(Collector, Prometheus, Grafana)]
 
     classDef done fill:#d1fae5,stroke:#059669,color:#064e3b;
     classDef stub fill:#fef3c7,stroke:#d97706,color:#78350f;
     classDef planned fill:#f3f4f6,stroke:#9ca3af,stroke-dasharray:4 3,color:#374151;
     class AS,GW,PR,ING,RET,AG,MCP done;
     class AIS,SB,AOAI1,AOAI2 stub;
-    class Client,COS planned;
+    class Client,COS,OBS planned;
 ```
 
 ## Proof: tests and a real run
@@ -78,20 +79,21 @@ Everything below was produced by running the code in this repository.
 | ------------------------------------ | -------- |
 | `@genai/agents`                      | 121      |
 | `@genai/mcp-gateway`                 | 139      |
-| `@genai/assistant`                   | 164      |
-| `@genai/llm-gateway`                 | 101      |
+| `@genai/assistant`                   | 173      |
+| `@genai/llm-gateway`                 | 105      |
 | `@genai/prompt-registry`             | 59       |
 | `@genai/ingestion`                   | 84       |
 | `@genai/retrieval`                   | 71       |
 | `@genai/auth`                        | 70       |
 | `@genai/guardrails`                  | 90       |
-| `@genai/shared`                      | 31       |
-| `@genai/e2e` (all services together) | 86       |
+| `@genai/shared`                      | 36       |
+| `@genai/e2e` (all services together) | 97       |
 | `@genai/evals` (the quality gate)    | 92       |
-| **Total**                            | **1108** |
+| `@genai/observability`               | 83       |
+| **Total**                            | **1220** |
 
 Format check, lint, typecheck and build also pass in CI. Many are end-to-end HTTP tests (failure
-injection, tenant isolation, access trimming, forged and expired tokens, spoofed headers). The 85
+injection, tenant isolation, access trimming, forged and expired tokens, spoofed headers). The 97
 `e2e` tests start the real services on real ports and talk to them over HTTP. To check those tests
 can actually fail, the code was deliberately broken in seven ways (access trimming, dropping the
 access list on upload, ignoring access in the "unchanged" check, and four guardrails): each breakage
@@ -130,6 +132,21 @@ mine (fixed) and a genuine gap (a one-signal prompt injection reaches a naive mo
 known gap instead of hidden. The benchmark and demo above were run again after that change; under heavy
 machine load a few runs hit timeouts, which the benchmark's refuse-to-continue guard turned into
 errors instead of flattering numbers.
+
+Observability (`@genai/observability`, ADR 0015) was checked the same ways. Its instrumentation and
+alert code was broken on purpose twenty-two ways (the privacy allowlist accepting prose or a JWT, the
+exporter keeping events or status text, the label allowlist removed, raw paths as route labels, the
+logger not scrubbing, the client not sending `traceparent`, the real tenant id in a metric, a user id
+leaked into a span, a metric name losing `_total`, the fast alert tier weakened, the empty-series guard
+and the two-window condition removed, an SLO target edited without regenerating the files, and five
+outcomes not being counted) and each fails a test. Two of those, the assistant's error outcome and the
+gateway's rejected and fallback outcomes, had no test until this exercise exposed it. A test scrapes a
+real Prometheus exporter and found that unit suffixes are not appended to metric names, which the
+generated alert rules would otherwise have got wrong with no sign of it. Simulated traffic proves the
+alert tiers: a total outage pages within ten minutes, a two-minute blip pages no one, and a steady 1%
+leak only raises a ticket. The end-to-end canary scan puts a question, a document, an IBAN and a token
+through the real services and searches dozens of spans, every metric point and every log line for them: none
+found.
 
 **A real run** (`npm run -s demo -w @genai/e2e`): documents are uploaded through the ingestion
 service, then the same question is asked by callers with different roles. Abridged:
@@ -280,6 +297,31 @@ What the tenant spent, and what the cache saved (cost-viewer role):
   cache:   4 hits / 8 misses (hit rate 33%), saved 1118 tokens / $0.003224
 ```
 
+**Observability** (the last part of the same demo): one question, followed through every service it
+touched by the trace id the response returns, then a check that telemetry holds none of what it was
+asked:
+
+```text
+Bob asks: "How long do refunds take?"
+  response header x-trace-id: fb056aa71607fb853c0c9da245258ade
+  POST /v1/ask                             8.4 ms  [assistant]
+    POST retrieval                         0.9 ms  [@genai/shared]
+      POST /v1/search                      0.5 ms  [retrieval]
+        retrieval.search                   0.2 ms  [retrieval]
+    POST prompt-registry                   1.4 ms  [@genai/shared]
+      POST /v1/prompts/:name/resolve       0.4 ms  [prompt-registry]
+    POST gateway                           1.3 ms  [@genai/shared]
+      POST /v1/chat/completions            0.6 ms  [llm-gateway]
+
+  genai.assistant.answers {"service":"assistant","outcome":"grounded","cache":"off"} = 1
+  genai.llm.cost {"service":"llm-gateway","provider":"mock-grounded","tenant":"1d7e1d0b1a8e"} = 625
+
+  scanned 32 spans and 25 data points for the question, the answer, the tenant and the user: none found
+```
+
+The tenant on the spend metric is a keyed hash, not `acme-bank`. Durations are small because everything
+runs in one process on stand-ins.
+
 **A measured run** (`npm run -s bench -w @genai/e2e`): one workload of 120 requests (70% repeat
 questions in several wordings, 30% unique) through the real services, with the answer cache off, in
 shadow mode and serving. The model is a deterministic stand-in at illustrative prices, so this shows
@@ -348,22 +390,25 @@ reveal what the asking user may already read.
 
 ## Repository layout
 
-| Path                   | Purpose                                                                                                        |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `apps/agents`          | Tool-using agent with limits and approval before writes ([docs](apps/agents/README.md))                        |
-| `apps/mcp-gateway`     | Approved MCP tool servers: pinned definitions, per-role access, audit ([docs](apps/mcp-gateway/README.md))     |
-| `apps/assistant`       | Ask a question, get a cited answer, as the user ([docs](apps/assistant/README.md))                             |
-| `apps/llm-gateway`     | Azure OpenAI gateway: limits, retries, fallback ([docs](apps/llm-gateway/README.md))                           |
-| `apps/prompt-registry` | Versioned prompts, rollback, A/B ([docs](apps/prompt-registry/README.md))                                      |
-| `apps/ingestion`       | Queue-driven document ingestion ([docs](apps/ingestion/README.md))                                             |
-| `apps/retrieval`       | Hybrid search with access trimming ([docs](apps/retrieval/README.md))                                          |
-| `packages/guardrails`  | `@genai/guardrails`: PII redaction, injection detection, output checks ([docs](packages/guardrails/README.md)) |
-| `packages/auth`        | `@genai/auth`: JWT validation, guard, on-behalf-of, secrets ([docs](packages/auth/README.md))                  |
-| `packages/shared`      | `@genai/shared`: tenant context and cross-service helpers                                                      |
-| `tests/e2e`            | The real services together over HTTP, plus the runnable demo and benchmark                                     |
-| `tests/evals`          | The quality gate: labelled cases, judge, thresholds and baseline ([docs](tests/evals/README.md))               |
-| `docs/adr`             | Architecture decision records: why X over Y                                                                    |
-| `.github/`             | CI workflow and PR template                                                                                    |
+| Path                     | Purpose                                                                                                             |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `apps/agents`            | Tool-using agent with limits and approval before writes ([docs](apps/agents/README.md))                             |
+| `apps/mcp-gateway`       | Approved MCP tool servers: pinned definitions, per-role access, audit ([docs](apps/mcp-gateway/README.md))          |
+| `apps/assistant`         | Ask a question, get a cited answer, as the user ([docs](apps/assistant/README.md))                                  |
+| `apps/llm-gateway`       | Azure OpenAI gateway: limits, retries, fallback ([docs](apps/llm-gateway/README.md))                                |
+| `apps/prompt-registry`   | Versioned prompts, rollback, A/B ([docs](apps/prompt-registry/README.md))                                           |
+| `apps/ingestion`         | Queue-driven document ingestion ([docs](apps/ingestion/README.md))                                                  |
+| `apps/retrieval`         | Hybrid search with access trimming ([docs](apps/retrieval/README.md))                                               |
+| `packages/guardrails`    | `@genai/guardrails`: PII redaction, injection detection, output checks ([docs](packages/guardrails/README.md))      |
+| `packages/auth`          | `@genai/auth`: JWT validation, guard, on-behalf-of, secrets ([docs](packages/auth/README.md))                       |
+| `packages/shared`        | `@genai/shared`: tenant context and cross-service helpers                                                           |
+| `packages/observability` | `@genai/observability`: traces, metrics, logs, SLOs and alert generation ([docs](packages/observability/README.md)) |
+| `tests/e2e`              | The real services together over HTTP, plus the runnable demo and benchmark                                          |
+| `tests/evals`            | The quality gate: labelled cases, judge, thresholds and baseline ([docs](tests/evals/README.md))                    |
+| `docs/adr`               | Architecture decision records: why X over Y                                                                         |
+| `docs/runbooks`          | What to do when each alert fires                                                                                    |
+| `ops/`                   | Generated Prometheus rules and Grafana dashboard (do not edit by hand)                                              |
+| `.github/`               | CI workflow and PR template                                                                                         |
 
 ## Getting started
 
@@ -429,7 +474,10 @@ building the remaining pieces, so there is always a demonstrable system.
       scored on retrieval, groundedness (an independent judge that is itself graded), citations,
       abstention, leaks and cost; floors, a baseline ratchet and a sample-size check; eight
       regressions replayed in CI to prove the gate can fail (ADR 0014)
-- [ ] **Step 13: Observability.** OpenTelemetry traces, SLO dashboards and alerts
+- [x] **Step 13: Observability.** OpenTelemetry traces across all seven services, a metric catalog,
+      JSON logs tied to traces, an allowlist so telemetry cannot carry what the platform protects
+      (checked by a canary scan), six SLOs with multi-window burn-rate alerts, Prometheus rules and a
+      Grafana dashboard generated from the same definitions, and a runbook behind every alert (ADR 0015)
 - [ ] **Step 14: Delivery.** Docker, Helm, AKS, canary rollout, Bicep/Terraform
 - [ ] **Step 15: Proof.** Load-test results, cost-savings numbers, eval scores
 
