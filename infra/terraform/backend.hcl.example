@@ -1,0 +1,7 @@
+# Copy to backend.hcl (gitignored). The storage account is created once, by hand or by a bootstrap
+# script, outside this configuration, with blob versioning and no public access.
+resource_group_name  = "rg-tfstate"
+storage_account_name = "sttfstategenai"
+container_name       = "tfstate"
+key                  = "genai-staging.tfstate"
+use_azuread_auth     = true
