@@ -69,11 +69,13 @@ async function readBody(req: IncomingMessage): Promise<string> {
 export async function startDevTokenEndpoint(
   options: DevTokenEndpointOptions,
   port = 0,
+  /** Loopback unless asked: inside a container network the stand-in must listen on all addresses. */
+  host = '127.0.0.1',
 ): Promise<RunningDevTokenEndpoint> {
   const server: Server = createServer((req, res) => {
     void handle(req, res, options).catch(() => send(res, 400, { error: 'invalid_request' }));
   });
-  await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) => server.listen(port, host, resolve));
 
   return {
     url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/oauth2/v2.0/token`,
@@ -137,4 +139,32 @@ async function handle(
       audience: downstream,
     }),
   });
+}
+
+/**
+ * Reads the services allowed to obtain tokens from JSON: `{ "<client id>": { "secret", "audience",
+ * "roles"? } }`. Refuses anything malformed so a typo does not silently leave a service locked out.
+ */
+export function parseDevClients(text: string): Record<string, DevClient> {
+  const raw: unknown = JSON.parse(text);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('clients must be a JSON object keyed by client id');
+  }
+  const clients: Record<string, DevClient> = {};
+  for (const [id, value] of Object.entries(raw)) {
+    const c = value as Partial<DevClient> | null;
+    if (typeof c?.secret !== 'string' || !c.secret)
+      throw new Error(`client "${id}" needs a secret`);
+    if (typeof c.audience !== 'string' || !c.audience) {
+      throw new Error(`client "${id}" needs an audience`);
+    }
+    if (
+      c.roles !== undefined &&
+      !(Array.isArray(c.roles) && c.roles.every((r) => typeof r === 'string'))
+    ) {
+      throw new Error(`client "${id}" roles must be a list of strings`);
+    }
+    clients[id] = { secret: c.secret, audience: c.audience, ...(c.roles && { roles: c.roles }) };
+  }
+  return clients;
 }
