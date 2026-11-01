@@ -19,7 +19,7 @@ import {
 } from '../../../apps/ingestion/src/config/config';
 import { AppModule as GatewayModule } from '../../../apps/llm-gateway/src/app.module';
 import { PRICE_BOOK, PriceBook } from '../../../apps/llm-gateway/src/cost/pricing';
-import { LLM_PROVIDERS } from '../../../apps/llm-gateway/src/llm/types';
+import { LLM_PROVIDERS, type LlmProvider } from '../../../apps/llm-gateway/src/llm/types';
 import { ScriptedAgentProvider } from './scripted-agent-provider';
 import { AppModule as McpGatewayModule } from '../../../apps/mcp-gateway/src/app.module';
 import {
@@ -430,6 +430,9 @@ export interface StackOptions {
   streamDelayMs?: number;
   /** `monitor` is shadow mode: guardrails report what they would do but change nothing. */
   guardrailsMode?: 'enforce' | 'monitor';
+  /** A real model in place of the stand-in. Prices are per million tokens, keyed by provider name. */
+  providers?: LlmProvider[];
+  prices?: Record<string, { inputPerMTok: number; outputPerMTok: number }>;
 }
 
 export async function startStack(options: StackOptions = {}): Promise<Stack> {
@@ -443,9 +446,9 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
   const gateway = await start(GatewayModule, AUDIENCE.gateway, issuer, (b) =>
     b
       .overrideProvider(LLM_PROVIDERS)
-      .useValue([llm])
+      .useValue(options.providers ?? [llm])
       .overrideProvider(PRICE_BOOK)
-      .useValue(new PriceBook(MODEL_PRICES)),
+      .useValue(new PriceBook(options.prices ?? MODEL_PRICES)),
   );
 
   // Stand-in for Entra's on-behalf-of endpoint, so the real OBO client runs over real HTTP.
