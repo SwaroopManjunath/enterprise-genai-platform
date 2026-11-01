@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { parseSse } from '@genai/shared';
 import {
   EnvSecretProvider,
   SECRET_PROVIDER,
@@ -17,6 +18,7 @@ import {
   loadConfig as loadIngestionConfig,
 } from '../../../apps/ingestion/src/config/config';
 import { AppModule as GatewayModule } from '../../../apps/llm-gateway/src/app.module';
+import { PRICE_BOOK, PriceBook } from '../../../apps/llm-gateway/src/cost/pricing';
 import { LLM_PROVIDERS } from '../../../apps/llm-gateway/src/llm/types';
 import { ScriptedAgentProvider } from './scripted-agent-provider';
 import { AppModule as McpGatewayModule } from '../../../apps/mcp-gateway/src/app.module';
@@ -56,6 +58,25 @@ export interface Caller {
   tenant: string;
   userId?: string;
   roles?: string[];
+}
+
+export interface StreamedEvent {
+  type: string;
+  data: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  /** Milliseconds from the call until this event arrived. */
+  atMs: number;
+}
+
+export interface StreamedAnswer {
+  status: number;
+  error?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  events: StreamedEvent[];
+  /** The text pieces joined: what a reader would have seen. */
+  text: string;
+  firstDeltaMs: number | undefined;
+  totalMs: number;
+  /** The final, authoritative event's data. */
+  done?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
 export interface HttpResult {
@@ -128,6 +149,71 @@ export class Stack {
       token: this.token('assistant', caller),
       body: { question, ...extra.body },
       ...(extra.headers && { headers: extra.headers }),
+    });
+  }
+
+  /** Ask as a user and read the answer as it arrives, timing each piece from the moment of the call. */
+  async askStream(
+    caller: Caller,
+    question: string,
+    options: { signal?: AbortSignal; onEvent?: (event: StreamedEvent) => void } = {},
+  ): Promise<StreamedAnswer> {
+    const startedAt = performance.now();
+    const response = await fetch(`${this.urls.assistant}/v1/ask`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${this.token('assistant', caller)}`,
+      },
+      body: JSON.stringify({ question, stream: true }),
+      ...(options.signal && { signal: options.signal }),
+    });
+    if (response.status !== 200) {
+      return {
+        status: response.status,
+        error: await response.json(),
+        events: [],
+        text: '',
+        firstDeltaMs: undefined,
+        totalMs: performance.now() - startedAt,
+      };
+    }
+    const events: StreamedEvent[] = [];
+    let firstDeltaMs: number | undefined;
+    for await (const message of parseSse(response.body as ReadableStream<Uint8Array>)) {
+      const event = {
+        type: message.event ?? 'message',
+        data: JSON.parse(message.data),
+        atMs: performance.now() - startedAt,
+      };
+      if (event.type === 'delta') firstDeltaMs ??= event.atMs;
+      events.push(event);
+      options.onEvent?.(event);
+    }
+    return {
+      status: 200,
+      events,
+      text: events
+        .filter((e) => e.type === 'delta')
+        .map((e) => e.data.text)
+        .join(''),
+      firstDeltaMs,
+      totalMs: performance.now() - startedAt,
+      done: events.find((e) => e.type === 'done')?.data,
+    };
+  }
+
+  /** What a tenant has spent through the gateway, as a cost-viewer. */
+  usage(tenant: string, days = 7): Promise<HttpResult> {
+    return this.call('GET', 'gateway', `/v1/usage?days=${days}`, {
+      token: this.token('gateway', { tenant, roles: ['cost-viewer'] }),
+    });
+  }
+
+  /** What the answer cache has done for a tenant, as a cost-viewer. */
+  cacheStats(tenant: string): Promise<HttpResult> {
+    return this.call('GET', 'assistant', '/v1/cache/stats', {
+      token: this.token('assistant', { tenant, roles: ['cost-viewer'] }),
     });
   }
 
@@ -323,7 +409,14 @@ async function start(
   return { app, url: `http://127.0.0.1:${port}` };
 }
 
+/** Illustrative list prices (dollars per million tokens) for the stand-in model. */
+export const MODEL_PRICES = { 'mock-grounded': { inputPerMTok: 2.5, outputPerMTok: 10 } };
+
 export interface StackOptions {
+  /** The assistant's answer cache: `off` (default), `shadow` (measure only) or `serve`. */
+  cacheMode?: 'off' | 'shadow' | 'serve';
+  /** Pause between streamed pieces from the stand-in model, so time to first token is measurable. */
+  streamDelayMs?: number;
   /** `monitor` is shadow mode: guardrails report what they would do but change nothing. */
   guardrailsMode?: 'enforce' | 'monitor';
 }
@@ -335,8 +428,13 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
 
   const retrieval = await start(RetrievalModule, AUDIENCE.retrieval, issuer);
   const prompts = await start(PromptsModule, AUDIENCE.prompts, issuer);
+  llm.streamDelayMs = options.streamDelayMs ?? 0;
   const gateway = await start(GatewayModule, AUDIENCE.gateway, issuer, (b) =>
-    b.overrideProvider(LLM_PROVIDERS).useValue([llm]),
+    b
+      .overrideProvider(LLM_PROVIDERS)
+      .useValue([llm])
+      .overrideProvider(PRICE_BOOK)
+      .useValue(new PriceBook(MODEL_PRICES)),
   );
 
   // Stand-in for Entra's on-behalf-of endpoint, so the real OBO client runs over real HTTP.
@@ -368,6 +466,7 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
           OBO_TOKEN_ENDPOINT: obo.url,
           OBO_CLIENT_ID: 'assistant',
           GUARDRAILS_MODE: options.guardrailsMode ?? 'enforce',
+          CACHE_MODE: options.cacheMode ?? 'off',
         }),
       )
       .overrideProvider(SECRET_PROVIDER)

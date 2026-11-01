@@ -6,7 +6,8 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "jest",
-    "demo": "ts-node src/demo.ts"
+    "demo": "ts-node src/demo.ts",
+    "bench": "ts-node src/bench.ts"
   },
   "dependencies": {
     "@genai/auth": "0.1.0",
