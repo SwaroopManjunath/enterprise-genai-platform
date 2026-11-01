@@ -26,8 +26,10 @@ jobs:
       - uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: Dockerfile
-          # DL3066 only says the user is named, not numbered; the chart pins uid 1000 anyway.
-          ignore: DL3066
+          # DL3006: the base image is an ARG whose default is tagged (node:22-bookworm-slim), which this
+          # version of hadolint cannot see through. DL3066: the user is named, not numbered; the chart
+          # pins uid 1000 anyway.
+          ignore: DL3006,DL3066
 
   images:
     runs-on: ubuntu-latest
@@ -54,7 +56,7 @@ jobs:
           test "$(docker run --rm genai/${{ matrix.service }}:ci id -u)" = "1000"
           ! docker run --rm genai/${{ matrix.service }}:ci >/dev/null 2>&1
       - name: Scan for vulnerabilities (high and critical, with a fix available)
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.33.1
         with:
           image-ref: genai/${{ matrix.service }}:ci
           severity: HIGH,CRITICAL
