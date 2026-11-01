@@ -1,0 +1,197 @@
+# The whole platform on one machine, with a real Prometheus, Grafana and Jaeger watching it.
+#
+#   docker compose -f deploy/compose/docker-compose.yml up --build -d
+#   docker compose -f deploy/compose/docker-compose.yml run --rm smoke
+#
+# Development only: the identity provider is a local stand-in with throw-away keys, the model is the
+# deterministic mock, every secret below is a placeholder, and everything listens on 127.0.0.1.
+name: genai
+
+x-service: &service
+  restart: unless-stopped
+  depends_on:
+    devidp:
+      condition: service_healthy
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  read_only: true
+  volumes:
+    - devkeys:/keys:ro
+  environment: &env
+    AUTH_ISSUER: https://login.test.local/v2.0
+    AUTH_JWKS_FILE: /keys/jwks.json
+    OBO_TOKEN_ENDPOINT: http://devidp:4000/oauth2/v2.0/token
+    GATEWAY_URL: http://llm-gateway:3000
+    PROMPTS_URL: http://prompt-registry:3000
+    RETRIEVAL_URL: http://retrieval:3000
+    MCP_GATEWAY_URL: http://mcp-gateway:3000
+    # Telemetry: traces to Jaeger, metrics scraped by Prometheus. The salt must be the same in every
+    # service so one tenant is one label.
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+    METRICS_PORT: '9464'
+    DEPLOYMENT_ENVIRONMENT: compose
+    TELEMETRY_PSEUDONYM_SALT: compose-dev-salt
+
+services:
+  keys-init:
+    image: genai/assistant:dev
+    user: root
+    entrypoint: ['sh', '-c', 'chown node:node /keys']
+    volumes:
+      - devkeys:/keys
+    restart: 'no'
+
+  devidp:
+    image: genai/assistant:dev
+    depends_on:
+      keys-init:
+        condition: service_completed_successfully
+    entrypoint:
+      [
+        'node',
+        '/repo/packages/auth/dist/bin/dev-token.js',
+        'idp',
+        '--clients-file',
+        '/idp/clients.json',
+        '--host',
+        '0.0.0.0',
+        '--port',
+        '4000',
+      ]
+    environment:
+      GENAI_DEV_KEYS_DIR: /keys
+    volumes:
+      - devkeys:/keys
+      - ./idp-clients.json:/idp/clients.json:ro
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    healthcheck:
+      test: ['CMD', 'test', '-s', '/keys/jwks.json']
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  llm-gateway:
+    <<: *service
+    image: genai/llm-gateway:dev
+    build: &build { context: ../.., args: { SERVICE: llm-gateway } }
+    ports: ['127.0.0.1:3000:3000']
+    environment:
+      <<: *env
+      AUTH_AUDIENCE: api://gateway
+      LLM_PROVIDER: mock-grounded
+
+  prompt-registry:
+    <<: *service
+    image: genai/prompt-registry:dev
+    build: { context: ../.., args: { SERVICE: prompt-registry } }
+    ports: ['127.0.0.1:3001:3000']
+    environment:
+      <<: *env
+      AUTH_AUDIENCE: api://prompt-registry
+
+  retrieval:
+    <<: *service
+    image: genai/retrieval:dev
+    build: { context: ../.., args: { SERVICE: retrieval } }
+    ports: ['127.0.0.1:3003:3000']
+    environment:
+      <<: *env
+      AUTH_AUDIENCE: api://retrieval
+
+  ingestion:
+    <<: *service
+    image: genai/ingestion:dev
+    build: { context: ../.., args: { SERVICE: ingestion } }
+    ports: ['127.0.0.1:3002:3000']
+    environment:
+      <<: *env
+      AUTH_AUDIENCE: api://ingestion
+      INDEX_SINK: retrieval
+      TOKEN_ENDPOINT: http://devidp:4000/oauth2/v2.0/token
+      CLIENT_ID: ingestion
+      SECRET_INGESTION_CLIENT_SECRET: dev-ingestion-secret
+
+  assistant:
+    <<: *service
+    image: genai/assistant:dev
+    build: { context: ../.., args: { SERVICE: assistant } }
+    ports: ['127.0.0.1:3004:3000']
+    environment:
+      <<: *env
+      AUTH_AUDIENCE: api://assistant
+      OBO_CLIENT_ID: assistant
+      SECRET_ASSISTANT_CLIENT_SECRET: dev-assistant-secret
+
+  agents:
+    <<: *service
+    image: genai/agents:dev
+    build: { context: ../.., args: { SERVICE: agents } }
+    ports: ['127.0.0.1:3005:3000']
+    environment:
+      <<: *env
+      AUTH_AUDIENCE: api://agents
+      OBO_CLIENT_ID: agents-app
+      SECRET_AGENTS_CLIENT_SECRET: dev-agents-secret
+
+  mcp-gateway:
+    <<: *service
+    image: genai/mcp-gateway:dev
+    build: { context: ../.., args: { SERVICE: mcp-gateway } }
+    ports: ['127.0.0.1:3006:3000']
+    environment:
+      <<: *env
+      AUTH_AUDIENCE: api://mcp-gateway
+      OBO_CLIENT_ID: mcp-gateway
+      SECRET_MCP_GATEWAY_CLIENT_SECRET: dev-mcp-secret
+
+  # ---- what watches it
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=2d
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # The rules the SLOs generate: the same file the chart ships.
+      - ../../ops/prometheus/rules.yaml:/etc/prometheus/rules.yaml:ro
+    ports: ['127.0.0.1:9090:9090']
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: 'true'
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_USERS_DEFAULT_THEME: light
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../../ops/grafana:/var/lib/grafana/dashboards:ro
+    ports: ['127.0.0.1:3100:3000']
+    depends_on: [prometheus]
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.71.0
+    environment:
+      COLLECTOR_OTLP_ENABLED: 'true'
+    ports:
+      - '127.0.0.1:16686:16686'
+
+  # Drives the platform through its real API and checks what Prometheus saw. Exits non-zero if not.
+  smoke:
+    image: genai/assistant:dev
+    profiles: ['tools']
+    entrypoint: ['node', '/smoke/smoke.mjs']
+    environment:
+      PROMETHEUS_URL: http://prometheus:9090
+      JAEGER_URL: http://jaeger:16686
+      GENAI_DEV_KEYS_DIR: /keys
+    volumes:
+      - devkeys:/keys:ro
+      - ./smoke.mjs:/smoke/smoke.mjs:ro
+    depends_on:
+      assistant: { condition: service_healthy }
+      ingestion: { condition: service_healthy }
+      prometheus: { condition: service_started }
+
+volumes:
+  devkeys:
