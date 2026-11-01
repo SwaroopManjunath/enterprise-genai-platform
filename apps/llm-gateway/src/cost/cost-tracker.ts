@@ -8,6 +8,8 @@ export interface SpendRecord {
   cost: Cost;
   /** True when the answer was streamed rather than returned whole. */
   streamed: boolean;
+  /** True when the token counts are our estimate: a stream that ended before the upstream reported usage. */
+  estimated?: boolean;
 }
 
 export interface ProviderSpend {
@@ -21,6 +23,8 @@ export interface DaySpend {
   day: string;
   requests: number;
   streamedRequests: number;
+  /** Requests whose token counts were estimated because the stream ended early. */
+  estimatedRequests: number;
   promptTokens: number;
   completionTokens: number;
   costMicroUsd: number;
@@ -47,6 +51,7 @@ const emptyDay = (day: string): DaySpend => ({
   day,
   requests: 0,
   streamedRequests: 0,
+  estimatedRequests: 0,
   promptTokens: 0,
   completionTokens: 0,
   costMicroUsd: 0,
@@ -66,6 +71,7 @@ export class InMemoryCostTracker implements CostTracker {
 
     entry.requests += 1;
     if (spend.streamed) entry.streamedRequests += 1;
+    if (spend.estimated) entry.estimatedRequests += 1;
     entry.promptTokens += spend.promptTokens;
     entry.completionTokens += spend.completionTokens;
     entry.costMicroUsd += spend.cost.microUsd;

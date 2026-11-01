@@ -13,13 +13,20 @@ export const chatRequestSchema = z.object({
     .max(200),
   maxTokens: z.number().int().positive().max(32_000).optional(),
   temperature: z.number().min(0).max(2).optional(),
+  /** Deliver the answer as server-sent events while it is generated. */
+  stream: z.boolean().optional(),
 });
 
 export function parseChatRequest(body: unknown): ChatRequest {
+  return parseChatBody(body).request;
+}
+
+export function parseChatBody(body: unknown): { request: ChatRequest; stream: boolean } {
   const parsed = chatRequestSchema.parse(body);
-  return {
+  const request: ChatRequest = {
     messages: parsed.messages,
     ...(parsed.maxTokens !== undefined && { maxTokens: parsed.maxTokens }),
     ...(parsed.temperature !== undefined && { temperature: parsed.temperature }),
   };
+  return { request, stream: parsed.stream === true };
 }

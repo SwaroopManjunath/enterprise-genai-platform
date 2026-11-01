@@ -1,5 +1,6 @@
-import { estimateTokens } from './mock.provider';
-import type { ChatRequest, ChatResult, LlmProvider } from './types';
+import { streamFromResult } from './streaming';
+import { estimateTokens } from './tokens';
+import type { ChatRequest, ChatResult, LlmProvider, StreamEvent } from './types';
 
 const STOPWORDS = new Set(
   'the and are for you your what when where which who how does did can has have was were with from that this will about into than then them they their there'.split(
@@ -47,6 +48,16 @@ const sameWord = (a: string, b: string): boolean =>
 export class GroundedMockProvider implements LlmProvider {
   readonly name = 'mock-grounded';
   calls = 0;
+  /** Pause between streamed pieces, to make time-to-first-token measurable. */
+  streamDelayMs = 0;
+
+  /** Goes through `chat`, so a subclass that changes the answer changes the stream with it. */
+  async *chatStream(
+    request: ChatRequest,
+    signal?: AbortSignal,
+  ): AsyncGenerator<StreamEvent, void, void> {
+    yield* streamFromResult(await this.chat(request), this.streamDelayMs, signal);
+  }
 
   chat(request: ChatRequest): Promise<ChatResult> {
     this.calls += 1;
