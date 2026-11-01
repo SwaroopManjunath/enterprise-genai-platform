@@ -14,7 +14,7 @@ COPY tests/evals/package.json tests/evals/package.json
 COPY tests/delivery/package.json tests/delivery/package.json
 RUN npm ci --ignore-scripts
 ARG SERVICE
-RUN test -n "$SERVICE" && test -d "apps/$SERVICE" || (echo "set --build-arg SERVICE=<one of apps/*>" && exit 1)
+RUN if [ -z "$SERVICE" ] || [ ! -d "apps/$SERVICE" ]; then echo "set --build-arg SERVICE=<one of apps/*>" >&2; exit 1; fi
 RUN npm run build -w @genai/shared -w @genai/auth -w @genai/guardrails -w @genai/observability \
  && npm run build -w "@genai/$SERVICE"
 
