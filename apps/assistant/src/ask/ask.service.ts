@@ -4,6 +4,7 @@ import {
   BLOCKED_ANSWER,
   type GuardrailMode,
   type Guardrails,
+  type OutputContext,
   type OutputReport,
   type QuestionReport,
   type SourcesReport,
@@ -13,6 +14,7 @@ import { Logger } from '@nestjs/common';
 import type { AssistantConfig } from '../config/config';
 import type {
   GatewayClient,
+  GatewayStreamEvent,
   PromptClient,
   RetrievalClient,
   SearchRequest,
@@ -20,9 +22,10 @@ import type {
 import type { CacheLayer } from '../cache/cache-layer';
 import { normalize } from '../cache/question-features';
 import { checkCitations, type Citation } from './citations';
+import { StreamGuard } from './stream-guard';
 import { GuardrailBlockedError } from './errors';
 import { BUILTIN_PROMPT_TEMPLATE, fillTemplate } from './prompt';
-import { formatSources, toSources } from './sources';
+import { formatSources, toSources, type Source } from './sources';
 
 export interface AskInput {
   question: string;
@@ -67,6 +70,8 @@ export interface Timings {
   totalMs: number;
   retrievalMs: number;
   modelMs?: number;
+  /** Streaming only: time until the first piece of the answer was sent to the caller. */
+  firstTokenMs?: number;
 }
 
 export interface AskResult {
@@ -85,6 +90,56 @@ export interface AskResult {
   /** Absent when the answer cache is off. */
   cache?: CacheInfo;
   timings: Timings;
+}
+
+/** What a streaming caller receives. The `done` event is authoritative; see `askStream`. */
+export type AskStreamEvent =
+  | {
+      type: 'meta';
+      requestId: string;
+      sourcesRetrieved: number;
+      prompt?: PromptInfo;
+      cache?: CacheInfo;
+    }
+  | { type: 'delta'; text: string }
+  | { type: 'done'; result: AskResult; replace: boolean }
+  | { type: 'error'; code: string };
+
+/** Everything needed to generate an answer, once the question and documents have been checked. */
+interface Prepared {
+  caller: AuthenticatedPrincipal;
+  requestId: string;
+  startedAt: number;
+  retrievalMs: number;
+  question: { text: string; report: QuestionReport };
+  sourcesReport: SourcesReport;
+  sources: Source[];
+  info: PromptInfo;
+  messages: { role: 'system' | 'user'; content: string }[];
+  outputContext: OutputContext;
+  cacheScope?: ReturnType<CacheLayer['scope']>;
+  cached?: ReturnType<CacheLayer['lookup']>;
+}
+
+/** What the model produced, however it was delivered. */
+interface Completion {
+  text: string;
+  usage: { promptTokens: number; completionTokens: number; totalTokens: number };
+  provider: string;
+  fallbackUsed: boolean;
+  cost?: { microUsd: number; priced: boolean };
+  modelMs: number;
+  firstTokenMs?: number;
+}
+
+/** When a stream ended without the gateway's own count: about four characters to a token. */
+function estimateUsage(
+  messages: readonly { content: string }[],
+  answer: string,
+): Completion['usage'] {
+  const promptTokens = Math.max(1, Math.ceil(messages.map((m) => m.content).join(' ').length / 4));
+  const completionTokens = Math.max(1, Math.ceil(answer.length / 4));
+  return { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens };
 }
 
 export const NO_SOURCES_ANSWER =
@@ -124,18 +179,178 @@ export class AskService {
     private readonly config: Pick<
       AssistantConfig,
       'gateway' | 'prompts' | 'retrieval' | 'promptName' | 'defaultTopK'
-    >,
+    > &
+      Partial<Pick<AssistantConfig, 'streamHoldbackChars'>>,
     private readonly guardrails: Guardrails,
     private readonly cache?: CacheLayer,
     private readonly clock: () => number = () => performance.now(),
-  ) {}
+  ) {
+    this.holdbackChars = config.streamHoldbackChars ?? 120;
+  }
+
+  private readonly holdbackChars: number;
 
   async ask(
     caller: AuthenticatedPrincipal,
     input: AskInput,
     requestId: string,
   ): Promise<AskResult> {
-    const { retrieval, gateway, obo } = this.clients;
+    const prepared = await this.prepare(caller, input, requestId);
+    if ('early' in prepared) return prepared.early;
+    const p = prepared.ready;
+
+    const modelStartedAt = this.clock();
+    const completion = await this.clients.gateway.chat(
+      await this.clients.obo.exchange(caller.accessToken, this.config.gateway.scope),
+      p.messages,
+      requestId,
+    );
+    return this.finish(p, {
+      text: completion.message.content,
+      usage: completion.usage,
+      provider: completion.provider,
+      fallbackUsed: completion.fallbackUsed,
+      ...(completion.cost && { cost: completion.cost }),
+      modelMs: this.clock() - modelStartedAt,
+    });
+  }
+
+  /**
+   * The same answer, delivered while it is generated. Every check still applies: the question and
+   * documents are checked before the model is called, and the answer passes through a StreamGuard
+   * that holds the tail back and re-runs the output checks on everything received so far, so
+   * nothing is sent that the finished answer's checks would have removed. The final `done` event
+   * is the authoritative answer, with citations verified; `replace` says whether it differs from
+   * the text that was streamed.
+   *
+   * Anything that can refuse the request (a guardrail, a limit, a dependency that is down) is
+   * raised before the first event, so those still arrive as ordinary errors.
+   */
+  async *askStream(
+    caller: AuthenticatedPrincipal,
+    input: AskInput,
+    requestId: string,
+    signal?: AbortSignal,
+  ): AsyncGenerator<AskStreamEvent, void, void> {
+    const prepared = await this.prepare(caller, input, requestId);
+    if ('early' in prepared) {
+      const r = prepared.early;
+      yield {
+        type: 'meta',
+        requestId,
+        sourcesRetrieved: r.sourcesRetrieved,
+        ...(r.prompt && { prompt: r.prompt }),
+        ...(r.cache && { cache: r.cache }),
+      };
+      yield { type: 'done', result: r, replace: false };
+      return;
+    }
+    const p = prepared.ready;
+
+    // Hang up on the model as soon as we stop wanting its answer (a leak, or the client leaving).
+    const upstream = new AbortController();
+    const hangUp = () => upstream.abort();
+    signal?.addEventListener('abort', hangUp, { once: true });
+
+    const modelStartedAt = this.clock();
+    const gatewayEvents = this.clients.gateway.chatStream(
+      await this.clients.obo.exchange(caller.accessToken, this.config.gateway.scope),
+      p.messages,
+      requestId,
+      upstream.signal,
+    );
+
+    try {
+      // Waiting for the first event means a refusal (quota, outage) is still a normal error.
+      let next = await gatewayEvents.next();
+      yield {
+        type: 'meta',
+        requestId,
+        sourcesRetrieved: p.sources.length,
+        prompt: p.info,
+        ...(p.cacheScope && this.cache ? { cache: { status: 'miss' as const } } : {}),
+      };
+
+      const guard = new StreamGuard(this.guardrails, p.outputContext, this.holdbackChars);
+      let firstTokenMs: number | undefined;
+      let blocked = false;
+      let done: Extract<GatewayStreamEvent, { type: 'done' }> | undefined;
+      let provider = 'unknown';
+      let fallbackUsed = false;
+
+      try {
+        while (!next.done) {
+          const event = next.value;
+          if (event.type === 'delta') {
+            provider = event.provider;
+            fallbackUsed = event.fallbackUsed;
+            const step = guard.push(event.text);
+            if (step.blocked) {
+              blocked = true;
+              upstream.abort(); // stop generating, and paying for, an answer we will not send
+              break;
+            }
+            if (step.release) {
+              firstTokenMs ??= this.clock() - p.startedAt;
+              yield { type: 'delta', text: step.release };
+            }
+          } else {
+            done = event;
+          }
+          next = await gatewayEvents.next();
+        }
+      } catch (error) {
+        if (signal?.aborted) return; // the client left: nothing to send
+        yield { type: 'error', code: 'generation_failed' };
+        this.logger.warn(`generation failed mid-stream: ${describe(error)}`);
+        return;
+      }
+
+      if (signal?.aborted) return; // the client left while we were reading: send nothing more
+
+      if (!blocked) {
+        const tail = guard.finish();
+        if (tail.blocked) blocked = true;
+        else if (tail.release) {
+          firstTokenMs ??= this.clock() - p.startedAt;
+          yield { type: 'delta', text: tail.release };
+        }
+      }
+
+      const result = this.finish(p, {
+        text: guard.received,
+        usage: done?.usage ?? estimateUsage(p.messages, guard.received),
+        provider: done?.provider ?? provider,
+        fallbackUsed: done?.fallbackUsed ?? fallbackUsed,
+        ...(done?.cost && { cost: done.cost }),
+        modelMs: this.clock() - modelStartedAt,
+        ...(firstTokenMs !== undefined && { firstTokenMs }),
+      });
+      yield {
+        type: 'done',
+        result,
+        // True whenever the final answer is not exactly what was streamed: a blocked answer, a
+        // dropped citation, or text a check changed after it was sent.
+        replace: blocked || !guard.consistent || result.answer !== guard.released,
+      };
+    } finally {
+      signal?.removeEventListener('abort', hangUp);
+      upstream.abort();
+      await gatewayEvents.return(undefined);
+    }
+  }
+
+  /**
+   * Everything before the model: the question and documents are checked, the prompt resolved, and
+   * the answer cache consulted. Returns either a finished answer (nothing to retrieve, or a cache
+   * hit) or what is needed to generate one.
+   */
+  private async prepare(
+    caller: AuthenticatedPrincipal,
+    input: AskInput,
+    requestId: string,
+  ): Promise<{ early: AskResult } | { ready: Prepared }> {
+    const { retrieval, obo } = this.clients;
     const guardrails = this.guardrails;
     const startedAt = this.clock();
 
@@ -160,14 +375,20 @@ export class AskService {
 
     if (sources.length === 0) {
       return {
-        requestId,
-        answer: NO_SOURCES_ANSWER,
-        citations: [],
-        grounded: false,
-        sourcesRetrieved: 0,
-        droppedCitations: [],
-        guardrails: { mode: guardrails.mode, question: question.report, sources: screened.report },
-        timings: { totalMs: this.clock() - startedAt, retrievalMs },
+        early: {
+          requestId,
+          answer: NO_SOURCES_ANSWER,
+          citations: [],
+          grounded: false,
+          sourcesRetrieved: 0,
+          droppedCitations: [],
+          guardrails: {
+            mode: guardrails.mode,
+            question: question.report,
+            sources: screened.report,
+          },
+          timings: { totalMs: this.clock() - startedAt, retrievalMs },
+        },
       };
     }
 
@@ -198,22 +419,28 @@ export class AskService {
         savedMicroUsd: costMicroUsd,
       });
       return {
-        requestId,
-        answer: cached.answer.answer,
-        citations: cached.answer.citations,
-        grounded: true,
-        sourcesRetrieved: sources.length,
-        droppedCitations: [],
-        prompt: info,
-        guardrails: { mode: guardrails.mode, question: question.report, sources: screened.report },
-        cache: {
-          status: 'hit',
-          kind: cached.kind,
-          similarity: cached.similarity,
-          savedTokens: tokens,
-          savedMicroUsd: costMicroUsd,
+        early: {
+          requestId,
+          answer: cached.answer.answer,
+          citations: cached.answer.citations,
+          grounded: true,
+          sourcesRetrieved: sources.length,
+          droppedCitations: [],
+          prompt: info,
+          guardrails: {
+            mode: guardrails.mode,
+            question: question.report,
+            sources: screened.report,
+          },
+          cache: {
+            status: 'hit',
+            kind: cached.kind,
+            similarity: cached.similarity,
+            savedTokens: tokens,
+            savedMicroUsd: costMicroUsd,
+          },
+          timings: { totalMs: this.clock() - startedAt, retrievalMs },
         },
-        timings: { totalMs: this.clock() - startedAt, retrievalMs },
       };
     }
 
@@ -221,44 +448,62 @@ export class AskService {
     // answer, so seeing it proves the model repeated its hidden instructions.
     const canary = `cnry-${randomBytes(8).toString('hex')}`;
     const system = `${rendered}\n\nConfidential marker (never output it): ${canary}`;
-
-    const modelStartedAt = this.clock();
-    const completion = await gateway.chat(
-      await obo.exchange(caller.accessToken, this.config.gateway.scope),
-      [
-        { role: 'system', content: system },
-        { role: 'user', content: question.text },
-      ],
-      requestId,
-    );
-
-    const modelMs = this.clock() - modelStartedAt;
-
-    // 3. The answer out: block a leak, redact sensitive data, strip image and HTML exfiltration.
     const instructionText = rendered.split(sourcesText).join('').split(question.text).join('');
-    const output = guardrails.checkOutput(completion.message.content, {
-      canary,
-      instructionText: `${instructionText}\n${system.slice(rendered.length)}`,
-    });
 
-    const timings = (): Timings => ({
-      totalMs: this.clock() - startedAt,
-      retrievalMs,
-      modelMs,
-    });
+    return {
+      ready: {
+        caller,
+        requestId,
+        startedAt,
+        retrievalMs,
+        question: { text: question.text, report: question.report },
+        sourcesReport: screened.report,
+        sources,
+        info,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: question.text },
+        ],
+        outputContext: {
+          canary,
+          instructionText: `${instructionText}\n${system.slice(rendered.length)}`,
+        },
+        ...(cacheScope && { cacheScope }),
+        ...(cached && { cached }),
+      },
+    };
+  }
+
+  /**
+   * After the model: the answer out is checked (block a leak, redact sensitive data, strip image
+   * and HTML exfiltration), citations are verified against what was really retrieved, and a clean
+   * grounded answer is kept in the cache.
+   */
+  private finish(p: Prepared, completion: Completion): AskResult {
+    const guardrails = this.guardrails;
+    const output = guardrails.checkOutput(completion.text, p.outputContext);
+
     const common = {
-      requestId,
-      sourcesRetrieved: sources.length,
+      requestId: p.requestId,
+      sourcesRetrieved: p.sources.length,
       usage: completion.usage,
       model: { provider: completion.provider, fallbackUsed: completion.fallbackUsed },
-      prompt: info,
+      prompt: p.info,
       guardrails: {
         mode: guardrails.mode,
-        question: question.report,
-        sources: screened.report,
+        question: p.question.report,
+        sources: p.sourcesReport,
         output: output.report,
       },
     };
+    const timings: Timings = {
+      totalMs: this.clock() - p.startedAt,
+      retrievalMs: p.retrievalMs,
+      modelMs: completion.modelMs,
+      ...(completion.firstTokenMs !== undefined && { firstTokenMs: completion.firstTokenMs }),
+    };
+    const tokens = completion.usage.totalTokens;
+    const costMicroUsd = completion.cost?.microUsd ?? 0;
 
     if (output.blocked) {
       return {
@@ -267,18 +512,18 @@ export class AskService {
         citations: [],
         grounded: false,
         droppedCitations: [],
-        ...this.afterGeneration(caller.tenantId, cacheScope, question.text, cached, {
+        ...this.afterGeneration(p.caller.tenantId, p.cacheScope, p.question.text, p.cached, {
           answer: BLOCKED_ANSWER,
           citations: [],
           cacheable: false,
-          tokens: completion.usage.totalTokens,
-          costMicroUsd: completion.cost?.microUsd ?? 0,
+          tokens,
+          costMicroUsd,
         }),
-        timings: timings(),
+        timings,
       };
     }
 
-    const checked = checkCitations(output.text, sources);
+    const checked = checkCitations(output.text, p.sources);
     const citations = checked.citations.map((c) => ({
       ...c,
       excerpt: guardrails.redactForOutput(c.excerpt),
@@ -291,7 +536,7 @@ export class AskService {
       citations,
       grounded,
       droppedCitations: checked.droppedMarkers,
-      ...this.afterGeneration(caller.tenantId, cacheScope, question.text, cached, {
+      ...this.afterGeneration(p.caller.tenantId, p.cacheScope, p.question.text, p.cached, {
         answer: checked.answer,
         citations,
         // Only a clean, grounded answer is worth keeping: nothing blocked, nothing invented.
@@ -300,10 +545,10 @@ export class AskService {
           checked.droppedMarkers.length === 0 &&
           !output.report.wouldBlock &&
           !output.blocked,
-        tokens: completion.usage.totalTokens,
-        costMicroUsd: completion.cost?.microUsd ?? 0,
+        tokens,
+        costMicroUsd,
       }),
-      timings: timings(),
+      timings,
     };
   }
 

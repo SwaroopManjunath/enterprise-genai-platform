@@ -54,6 +54,13 @@ const envSchema = z.object({
   CACHE_MAX_ENTRIES_PER_TENANT: z.coerce.number().int().positive().default(500),
   /** Change it to drop every cached answer at once (for instance after switching the model). */
   CACHE_EPOCH: z.string().min(1).max(64).default('1'),
+
+  /**
+   * How many characters of a streamed answer are held back so the output checks can see a pattern
+   * whole before any of it is sent. Longer is safer and starts the stream later; it must exceed
+   * the longest thing a check needs to see in one piece.
+   */
+  STREAM_HOLDBACK_CHARS: z.coerce.number().int().min(48).max(2000).default(120),
 });
 
 export interface CacheConfig {
@@ -80,6 +87,7 @@ export interface AssistantConfig {
   defaultTopK: number;
   guardrails: { mode: 'enforce' | 'monitor'; outputPii: PiiType[] };
   cache: CacheConfig;
+  streamHoldbackChars: number;
 }
 
 export const ASSISTANT_CONFIG = Symbol('ASSISTANT_CONFIG');
@@ -108,5 +116,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AssistantConfi
       maxEntriesPerTenant: e.CACHE_MAX_ENTRIES_PER_TENANT,
       epoch: e.CACHE_EPOCH,
     },
+    streamHoldbackChars: e.STREAM_HOLDBACK_CHARS,
   };
 }

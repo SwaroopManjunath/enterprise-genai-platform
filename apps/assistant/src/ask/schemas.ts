@@ -5,6 +5,8 @@ export const askSchema = z.object({
   topK: z.number().int().min(1).max(8).optional(),
   /** Ask for a freshly generated answer instead of one from the answer cache. */
   noCache: z.boolean().optional(),
+  /** Deliver the answer as server-sent events while it is generated. */
+  stream: z.boolean().optional(),
   filter: z
     .object({
       documentIds: z.array(z.string().min(1).max(128)).max(50).optional(),
