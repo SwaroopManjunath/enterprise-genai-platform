@@ -1,8 +1,11 @@
+import { getTracer, metricsFor, withSpan } from '@genai/observability';
 import { PermanentIngestionError } from '../domain/errors';
 import type { IngestionJob } from '../domain/job';
 import type { IngestionPipeline } from '../pipeline/ingestion-pipeline';
 import { LockLostError, type MessageQueue, type QueueMessage } from '../queue/message-queue';
 import type { JobStore } from '../store/job-store';
+
+const metrics = metricsFor('ingestion');
 
 export interface WorkerOptions {
   maxDeliveries: number;
@@ -41,6 +44,18 @@ export class IngestionWorker {
     const message = await this.queue.receive();
     if (!message) return 'idle';
 
+    return withSpan(getTracer('ingestion'), 'ingestion.process', () => this.process(message), {
+      attributes: { 'genai.delivery': message.deliveryCount },
+    });
+  }
+
+  private async process(message: QueueMessage<IngestionJob>): Promise<WorkResult> {
+    const startedAt = performance.now();
+    const record = (result: string): void => {
+      metrics.count('ingestionJobs', { result });
+      metrics.observe('ingestionDuration', { result }, performance.now() - startedAt);
+    };
+
     const { jobId } = message.body;
     await this.jobs.update(jobId, { status: 'processing', attempts: message.deliveryCount });
 
@@ -51,13 +66,17 @@ export class IngestionWorker {
         status: result.outcome === 'indexed' ? 'succeeded' : 'unchanged',
         chunkCount: result.chunkCount,
       });
+      record(result.outcome === 'indexed' ? 'succeeded' : 'unchanged');
     } catch (error) {
       // If our lock expired another worker owns the message now. The pipeline is idempotent, so
       // whatever we wrote is harmless; do not touch the message or the job record.
       if (error instanceof LockLostError) return 'processed';
-      await this.handleFailure(message, error).catch((e: unknown) => {
-        if (!(e instanceof LockLostError)) throw e;
-      });
+      record(
+        await this.handleFailure(message, error).catch((e: unknown) => {
+          if (!(e instanceof LockLostError)) throw e;
+          return 'lock_lost';
+        }),
+      );
     }
     return 'processed';
   }
@@ -69,24 +88,28 @@ export class IngestionWorker {
     return handled;
   }
 
-  private async handleFailure(message: QueueMessage<IngestionJob>, error: unknown): Promise<void> {
+  private async handleFailure(
+    message: QueueMessage<IngestionJob>,
+    error: unknown,
+  ): Promise<string> {
     const reason = error instanceof Error ? error.message : String(error);
     const { jobId } = message.body;
 
     if (error instanceof PermanentIngestionError) {
       await this.queue.deadLetter(message, reason);
       await this.jobs.update(jobId, { status: 'failed', error: reason });
-      return;
+      return 'failed';
     }
 
     if (message.deliveryCount >= this.options.maxDeliveries) {
       await this.queue.deadLetter(message, `Retries exhausted: ${reason}`);
       await this.jobs.update(jobId, { status: 'failed', error: reason });
-      return;
+      return 'dead_lettered';
     }
 
     await this.queue.abandon(message, this.backoffMs(message.deliveryCount));
     await this.jobs.update(jobId, { status: 'queued', error: reason });
+    return 'retried';
   }
 
   /** Exponential backoff with full jitter, capped. */

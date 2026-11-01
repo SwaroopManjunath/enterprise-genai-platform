@@ -27,7 +27,8 @@ export const CATALOG = {
     name: 'genai.assistant.answers',
     kind: 'counter',
     unit: '{answer}',
-    description: 'Answers by outcome: grounded, ungrounded, no_sources, blocked or cache_hit',
+    description:
+      'Answers by outcome: grounded, ungrounded, no_sources, blocked, cache_hit or error',
     labels: ['outcome', 'cache'],
   },
   firstToken: {
@@ -49,7 +50,8 @@ export const CATALOG = {
     name: 'genai.llm.calls',
     kind: 'counter',
     unit: '{call}',
-    description: 'Model calls by deployment and outcome (ok, error, fallback_served)',
+    description:
+      'Model calls by deployment and outcome (ok, fallback_served, error, or rejected before any call)',
     labels: ['provider', 'outcome'],
   },
   llmDuration: {
@@ -82,25 +84,18 @@ export const CATALOG = {
     labels: ['mode'],
     buckets: [0, 1, 2, 3, 4, 6, 8, 12, 20],
   },
-  retrievalTrimmed: {
-    name: 'genai.retrieval.trimmed',
-    kind: 'counter',
-    unit: '{result}',
-    description: 'Results removed because the caller may not read them: access control at work',
-    labels: ['reason'],
-  },
   ingestionJobs: {
     name: 'genai.ingestion.jobs',
     kind: 'counter',
     unit: '{job}',
-    description: 'Ingestion jobs by result (succeeded, unchanged, failed, dead_lettered)',
+    description: 'Ingestion jobs by result (succeeded, unchanged, retried, failed, dead_lettered)',
     labels: ['result'],
   },
   ingestionDuration: {
     name: 'genai.ingestion.duration',
     kind: 'histogram',
     unit: 'ms',
-    description: 'How long a document took from queue to searchable',
+    description: 'How long processing one queued document took, by result',
     labels: ['result'],
     buckets: DURATION_MS,
   },
@@ -123,8 +118,9 @@ export const CATALOG = {
     name: 'genai.mcp.calls',
     kind: 'counter',
     unit: '{call}',
-    description: 'MCP tool calls by outcome (ok, denied, tool_changed, upstream_error, ...)',
-    labels: ['outcome'],
+    description:
+      'Everything the MCP gateway audited, by action and outcome (ok, denied, tool_changed, ...)',
+    labels: ['action', 'outcome'],
   },
 } as const;
 

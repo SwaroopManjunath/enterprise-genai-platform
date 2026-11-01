@@ -1,9 +1,12 @@
+import { annotate, getTracer, metricsFor, withSpan } from '@genai/observability';
 import { cosineSimilarity, type Embedder } from '../embedding/embedder';
 import type { Caller, ChunkFilter, SearchIndex, SearchableChunk } from '../index/search-index';
 import { bm25Rank } from '../ranking/bm25';
 import { reciprocalRankFusion } from '../ranking/rrf';
 import type { Reranker } from '../rerank/reranker';
 import { tokenize } from '../text/tokenizer';
+
+const metrics = metricsFor('retrieval');
 
 export type SearchMode = 'hybrid' | 'keyword' | 'vector';
 
@@ -61,6 +64,26 @@ export class SearchService {
   ) {}
 
   async search(caller: Caller, request: SearchRequest): Promise<SearchHit[]> {
+    return withSpan(
+      getTracer('retrieval'),
+      'retrieval.search',
+      async () => {
+        const hits = await this.run(caller, request);
+        metrics.observe('retrievalResults', { mode: request.mode }, hits.length);
+        annotate({ 'genai.results.count': hits.length });
+        return hits;
+      },
+      {
+        attributes: {
+          'genai.search.mode': request.mode,
+          'genai.search.rerank': Boolean(request.rerank),
+          'genai.search.top_k': request.topK,
+        },
+      },
+    );
+  }
+
+  private async run(caller: Caller, request: SearchRequest): Promise<SearchHit[]> {
     const candidates = await this.index.candidates(caller, request.filter);
     if (candidates.length === 0) return [];
 

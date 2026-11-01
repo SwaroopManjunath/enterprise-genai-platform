@@ -24,6 +24,7 @@ import { normalize } from '../cache/question-features';
 import { checkCitations, type Citation } from './citations';
 import { StreamGuard } from './stream-guard';
 import { GuardrailBlockedError } from './errors';
+import { observeAnswer, observeFailure } from './observe';
 import { BUILTIN_PROMPT_TEMPLATE, fillTemplate } from './prompt';
 import { formatSources, toSources, type Source } from './sources';
 
@@ -198,6 +199,21 @@ export class AskService {
     input: AskInput,
     requestId: string,
   ): Promise<AskResult> {
+    try {
+      const result = await this.answer(caller, input, requestId);
+      observeAnswer(result, 'sync');
+      return result;
+    } catch (error) {
+      observeFailure(error);
+      throw error;
+    }
+  }
+
+  private async answer(
+    caller: AuthenticatedPrincipal,
+    input: AskInput,
+    requestId: string,
+  ): Promise<AskResult> {
     const prepared = await this.prepare(caller, input, requestId);
     if ('early' in prepared) return prepared.early;
     const p = prepared.ready;
@@ -230,6 +246,24 @@ export class AskService {
    * raised before the first event, so those still arrive as ordinary errors.
    */
   async *askStream(
+    caller: AuthenticatedPrincipal,
+    input: AskInput,
+    requestId: string,
+    signal?: AbortSignal,
+  ): AsyncGenerator<AskStreamEvent, void, void> {
+    try {
+      for await (const event of this.streamAnswer(caller, input, requestId, signal)) {
+        if (event.type === 'done') observeAnswer(event.result, 'stream');
+        if (event.type === 'error') observeFailure(new Error(event.code));
+        yield event;
+      }
+    } catch (error) {
+      observeFailure(error);
+      throw error;
+    }
+  }
+
+  private async *streamAnswer(
     caller: AuthenticatedPrincipal,
     input: AskInput,
     requestId: string,
