@@ -12,7 +12,7 @@ deployment.
 > `npm run demo -w @genai/e2e`), with **guardrails** against prompt injection, PII leaks and prompt
 > leaks (pattern-based, with documented limits), and an **agent** that uses tools as the user with
 > hard limits and a person's approval before any write, whose third-party tools come through an
-> **MCP gateway** (approved definitions, per-role access, an audit log). It all runs on **local stand-ins**: an in-memory queue, index and
+> **MCP gateway** (approved definitions, per-role access, an audit log), plus per-tenant **cost tracking**, a scoped **answer cache** (it can never hand one person another person's answer) and **guarded streaming**. It all runs on **local stand-ins**: an in-memory queue, index and
 > stores, a deterministic **mock model** (not an LLM), and locally generated signing keys instead of
 > Entra ID. Nothing has been run against real Azure yet.
 > The diagram below is the **target**, colour-coded by what exists today.
@@ -21,22 +21,22 @@ deployment.
 
 ✅ Done · 🚧 In progress · 📋 Planned
 
-| Area                 | Status     | What exists today                                                                                                                             | Still stubbed or missing                                                                 |
-| -------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Monorepo, CI, ADRs   | ✅ Done    | npm workspaces, strict TS, lint/format, commit hooks, GitHub Actions                                                                          | -                                                                                        |
-| LLM gateway          | ✅ Done    | Rate limits, token quotas, retries, fallback, error mapping                                                                                   | Azure client untested against real Azure; no cache                                       |
-| Prompt registry      | ✅ Done    | Versions, audited rollback, sticky A/B, safe templates                                                                                        | In-memory storage (no Cosmos DB yet)                                                     |
-| Ingestion pipeline   | ✅ Done    | Queue with DLQ, chunking per file type, idempotent; **writes to search with access lists** as its own service identity                        | In-memory queue; no PDF/Office, no delete; 200 KB limit                                  |
-| Retrieval service    | ✅ Done    | BM25 + vector, rank fusion, rerank, role/tenant trimming                                                                                      | Hash embedder (spelling, not meaning); in-memory                                         |
-| Auth (Entra ID)      | ✅ Done    | JWT validation, secure-by-default guard, role gates, OBO client                                                                               | Not run against real Entra ID; OBO and Key Vault not wired yet                           |
-| **Vertical slice**   | ✅ Done    | Upload, ingest, index, then ask: `assistant` acts as the user, verifies citations; e2e over real HTTP                                         | Mock model (deterministic test double); nothing on real Azure                            |
-| Guardrails           | ✅ Done    | PII/secret redaction, injection detection, canary and output checks; enforce or monitor mode                                                  | Pattern-based: misses paraphrase, other languages, split attacks; assistant only         |
-| Agent orchestrator   | ✅ Done    | Tool calls as the user, step/time/loop limits, owner approval before any write, audit trail; poisoned tool output screened                    | In-memory runs and stand-in tools; runs inside the request; owner-only approval          |
-| MCP gateway          | ✅ Done    | Default-deny registry, pinned tool definitions (a changed tool switches off), SSRF-safe egress, per-role access, audit log; the agent uses it | In-memory registry and audit log; Streamable HTTP and tools only; per-process rate limit |
-| Cost and performance | 📋 Planned | Per-tenant token quota in the gateway                                                                                                         | Semantic cache, cost tracking, streaming                                                 |
-| Evaluation pipeline  | 📋 Planned | -                                                                                                                                             | Groundedness/relevance gates that block deploys                                          |
-| Observability        | 📋 Planned | -                                                                                                                                             | OpenTelemetry traces, SLO dashboards, alerts                                             |
-| Delivery             | 📋 Planned | -                                                                                                                                             | Docker, Helm, AKS, canary rollout, Bicep/Terraform                                       |
+| Area                 | Status     | What exists today                                                                                                                                                  | Still stubbed or missing                                                                       |
+| -------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| Monorepo, CI, ADRs   | ✅ Done    | npm workspaces, strict TS, lint/format, commit hooks, GitHub Actions                                                                                               | -                                                                                              |
+| LLM gateway          | ✅ Done    | Rate limits, token quotas, retries, fallback, error mapping                                                                                                        | Azure client untested against real Azure; no cache                                             |
+| Prompt registry      | ✅ Done    | Versions, audited rollback, sticky A/B, safe templates                                                                                                             | In-memory storage (no Cosmos DB yet)                                                           |
+| Ingestion pipeline   | ✅ Done    | Queue with DLQ, chunking per file type, idempotent; **writes to search with access lists** as its own service identity                                             | In-memory queue; no PDF/Office, no delete; 200 KB limit                                        |
+| Retrieval service    | ✅ Done    | BM25 + vector, rank fusion, rerank, role/tenant trimming                                                                                                           | Hash embedder (spelling, not meaning); in-memory                                               |
+| Auth (Entra ID)      | ✅ Done    | JWT validation, secure-by-default guard, role gates, OBO client                                                                                                    | Not run against real Entra ID; OBO and Key Vault not wired yet                                 |
+| **Vertical slice**   | ✅ Done    | Upload, ingest, index, then ask: `assistant` acts as the user, verifies citations; e2e over real HTTP                                                              | Mock model (deterministic test double); nothing on real Azure                                  |
+| Guardrails           | ✅ Done    | PII/secret redaction, injection detection, canary and output checks; enforce or monitor mode                                                                       | Pattern-based: misses paraphrase, other languages, split attacks; assistant only               |
+| Agent orchestrator   | ✅ Done    | Tool calls as the user, step/time/loop limits, owner approval before any write, audit trail; poisoned tool output screened                                         | In-memory runs and stand-in tools; runs inside the request; owner-only approval                |
+| MCP gateway          | ✅ Done    | Default-deny registry, pinned tool definitions (a changed tool switches off), SSRF-safe egress, per-role access, audit log; the agent uses it                      | In-memory registry and audit log; Streamable HTTP and tools only; per-process rate limit       |
+| Cost and performance | ✅ Done    | Priced calls and per-tenant spend with a daily budget; answer cache scoped to what the model was given (off/shadow/serve); streaming with the output checks intact | In-memory cache and spend; wording similarity, not a real embedding model; synthetic benchmark |
+| Evaluation pipeline  | 📋 Planned | -                                                                                                                                                                  | Groundedness/relevance gates that block deploys                                                |
+| Observability        | 📋 Planned | -                                                                                                                                                                  | OpenTelemetry traces, SLO dashboards, alerts                                                   |
+| Delivery             | 📋 Planned | -                                                                                                                                                                  | Docker, Helm, AKS, canary rollout, Bicep/Terraform                                             |
 
 ## Architecture (target)
 
@@ -74,23 +74,23 @@ Everything below was produced by running the code in this repository.
 
 **Test suite** (`npm test`, also run by CI on every pull request, from a clean checkout):
 
-| Package                              | Tests   |
-| ------------------------------------ | ------- |
-| `@genai/agents`                      | 121     |
-| `@genai/mcp-gateway`                 | 139     |
-| `@genai/assistant`                   | 57      |
-| `@genai/llm-gateway`                 | 56      |
-| `@genai/prompt-registry`             | 59      |
-| `@genai/ingestion`                   | 84      |
-| `@genai/retrieval`                   | 71      |
-| `@genai/auth`                        | 70      |
-| `@genai/guardrails`                  | 90      |
-| `@genai/shared`                      | 20      |
-| `@genai/e2e` (all services together) | 70      |
-| **Total**                            | **837** |
+| Package                              | Tests    |
+| ------------------------------------ | -------- |
+| `@genai/agents`                      | 121      |
+| `@genai/mcp-gateway`                 | 139      |
+| `@genai/assistant`                   | 164      |
+| `@genai/llm-gateway`                 | 99       |
+| `@genai/prompt-registry`             | 59       |
+| `@genai/ingestion`                   | 84       |
+| `@genai/retrieval`                   | 71       |
+| `@genai/auth`                        | 70       |
+| `@genai/guardrails`                  | 90       |
+| `@genai/shared`                      | 31       |
+| `@genai/e2e` (all services together) | 85       |
+| **Total**                            | **1013** |
 
 Format check, lint, typecheck and build also pass in CI. Many are end-to-end HTTP tests (failure
-injection, tenant isolation, access trimming, forged and expired tokens, spoofed headers). The 70
+injection, tenant isolation, access trimming, forged and expired tokens, spoofed headers). The 85
 `e2e` tests start the real services on real ports and talk to them over HTTP. To check those tests
 can actually fail, the code was deliberately broken in seven ways (access trimming, dropping the
 access list on upload, ignoring access in the "unchanged" check, and four guardrails): each breakage
@@ -105,7 +105,16 @@ screening, the reviewed-hash check, the pin comparison, description screening, p
 for literal and resolved addresses, the response cap, audit tenant scoping) and the agent's own screen
 of MCP descriptions in a thirteenth: each fails the tests written for it. With the gateway's result
 screening off, the end-to-end test of the gateway fails while the agent's test still passes, because
-the agent screens a second time.
+the agent screens a second time. For cost and performance, fourteen more breakages (the cache
+fingerprint ignoring the sources, a document's text or the prompt version; the cache ignoring the
+tenant; the number and negation guard; shadow mode serving; `noCache`; the streaming hold-back; holding
+an unfinished link; the leak check; hanging up on the model; the replace flag; ignoring a client that
+left; the gateway recording spend) each fail the tests written for them. A property test checks 300
+random ways of chunking answers that contain cards, secrets, IBANs and exfiltration links. Writing the
+benchmark caught a mistake of mine: the gateway's per-minute rate limit was silently refusing requests
+and flattering the "cache off" numbers, so the script now fails on any refused request. The new
+timings in responses also exposed an old latent flake (tests that searched a whole response for digits
+could match inside a random request id), now removed.
 
 **A real run** (`npm run -s demo -w @genai/e2e`): documents are uploaded through the ingestion
 service, then the same question is asked by callers with different roles. Abridged:
@@ -227,6 +236,58 @@ What the auditor sees (counts only; no arguments or results are stored):
    1  tool_call:tool_changed
 ```
 
+and **cost and performance** (the cache serving, the stand-in model streaming 12 ms per word):
+
+```text
+The answer cache (serving):
+  Bob asks "How long do refunds take?" -> cache miss, model called
+  Bob asks "how long does a refund take" -> cache HIT (semantic, saved 271 tokens / $0.000798)
+  Bob asks "How long do refunds take?" -> cache HIT (exact, saved 271 tokens / $0.000798)
+  Bob asks "Is the card limit 500 euros?" -> cache miss, model called
+  Bob asks "Is the card limit 900 euros?" -> cache miss, model called
+
+It cannot hand one person another person's answer (same question, different documents):
+  Alice (manager)  -> cache miss, model called; answer uses the manager-only document
+  Bob (analyst)    -> cache miss, model called; answer does not use the manager-only document
+  Bob again        -> cache HIT (exact, saved 292 tokens / $0.000850); answer does not use the manager-only document
+  Alice again      -> cache HIT (exact, saved 321 tokens / $0.000945); answer uses the manager-only document
+
+Streaming: the reader sees text while the answer is still being written.
+  meta at 21 ms, first text at 264 ms, complete at 552 ms
+  24 pieces, 246 characters; the final event matches what was streamed
+
+Streaming does not skip the output checks:
+  a model that repeats its instructions: 0 pieces sent, final answer "I cannot provide that response." (replace: true)
+  a card number in a document: never sent, answer "The settlement card for refunds is [REDACTED:CARD] and it is..."
+
+What the tenant spent, and what the cache saved (cost-viewer role):
+  gateway: 8 model calls (3 streamed, 1 estimated), 2498 tokens, $0.007813
+  cache:   4 hits / 8 misses (hit rate 33%), saved 1155 tokens / $0.003391
+```
+
+**A measured run** (`npm run -s bench -w @genai/e2e`): one workload of 120 requests (70% repeat
+questions in several wordings, 30% unique) through the real services, with the answer cache off, in
+shadow mode and serving. The model is a deterministic stand-in at illustrative prices, so this shows
+what the platform does with traffic like this, not what your traffic or a real model would give:
+
+```text
+Workload: 120 requests, 49 distinct wordings (70% repeat questions in assorted wordings, 30% unique).
+Model: deterministic stand-in at illustrative prices ($2.50 in / $10 out per million tokens).
+
+mode    requests  model calls   tokens      cost  hits    median       p95
+off          120         120    26060   $0.0796     0     74 ms     84 ms
+shadow       120         120    26060   $0.0796     0     74 ms     83 ms
+serve        120          42     9509   $0.0288    78      6 ms     73 ms
+        (median / p95: how soon the reader sees the first text of the answer)
+
+Serving the cache: 65% fewer model calls, 64% fewer tokens, 64% less spend.
+Median wait for the first text: 74 ms without the cache, 6 ms with it.
+Shadow mode (nothing served): 100% of the answers it would have served matched a fresh one.
+
+Wrong hits: 0 of 8 pairs that differ by one word and mean something else.
+Rewordings served from the cache: 8 of 9.
+```
+
 The model here is a deterministic stand-in, so what this proves is the **path and the access
 control**, not answer quality. Bob never sees the restricted documents and the model is not even
 called for him; tightening a document's access takes effect on the next upload even when its text is
@@ -310,7 +371,10 @@ building the remaining pieces, so there is always a demonstrable system.
       quarantined, SSRF-safe egress, per-role access, the user's own identity presented upstream,
       results screened, append-only audit log; the agent uses it per request, writes still need
       approval (ADR 0012)
-- [ ] **Step 11: Cost and performance.** Semantic cache, per-tenant cost tracking, streaming
+- [x] **Step 11: Cost and performance.** Priced calls and per-tenant spend with a daily budget, an
+      answer cache scoped by tenant and by exactly what the model was given (so access control
+      cannot be bypassed; shadow mode measures it first), streaming through a guard that keeps the
+      output checks intact, interrupted streams billed as estimates (ADR 0013)
 - [ ] **Step 12: Evaluation pipeline.** Groundedness/relevance gates that block deploys
 - [ ] **Step 13: Observability.** OpenTelemetry traces, SLO dashboards and alerts
 - [ ] **Step 14: Delivery.** Docker, Helm, AKS, canary rollout, Bicep/Terraform
