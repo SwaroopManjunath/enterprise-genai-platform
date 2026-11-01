@@ -127,10 +127,10 @@ no test at all until the sabotage plan exposed it, so they now have one.
 
 ## Consequences
 
-- No collector, Prometheus or Grafana runs yet; Step 14 deploys them. The rules are checked as YAML and
-  against the exporter's names and the metrics' labels by our own tests, but they have not been loaded
-  into a real Prometheus (`promtool` is not part of the build), and the dashboard has not been opened in
-  a real Grafana. The first deployment is where both are exercised.
+- The rules were first checked only by our own tests. Step 14's compose stack then loaded them into a
+  real Prometheus (78 rules, none unhealthy), computed SLO values from real traffic and watched
+  `AssistantAvailabilityFastBurn` fire during a rehearsed outage ([ADR 0016](0016-delivery.md)). They have
+  not been run in Kubernetes, and are not checked with `promtool`.
 - Thresholds, the 5-second and 1.5-second latency targets and the 20% fallback share are reasoned, not
   measured. They are calibrated to nothing real until there is real traffic (Step 15); expect to move them.
 - An ingestion job runs after the upload request has ended, so its trace is separate from the upload's.
