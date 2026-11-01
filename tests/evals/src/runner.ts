@@ -1,8 +1,9 @@
-import { startStack, type Stack } from '../../e2e/src/stack';
+import { startStack, type Stack, type StackOptions } from '../../e2e/src/stack';
 import { byCategory, aggregate } from './aggregate';
 import type { Caller, Corpus, Dataset, EvalCase } from './dataset';
 import { evaluateCase, topK, type Observation } from './evaluate';
 import { evaluateGate, type Baseline, type Thresholds } from './gate';
+import { metricIntervals } from './stats';
 import type { Judge, Judgement } from './judge';
 import { measureJudge, type MetaExample } from './judge-meta';
 import type { EvalReport } from './report';
@@ -16,6 +17,12 @@ export interface RunInput {
   judgeExamples: readonly MetaExample[];
   thresholds: Thresholds;
   baseline: Baseline | undefined;
+  /** How many times each case is run: more than one for a model that varies. Default 1. */
+  runs?: number;
+  /** Stack settings beyond the variant's, such as a real model in place of the stand-in. */
+  stack?: StackOptions;
+  /** Names the model and judge in the report when they are not the stand-ins. */
+  model?: { answers: string; judge: string };
 }
 
 /**
@@ -29,7 +36,8 @@ export async function runEvaluation(input: RunInput): Promise<EvalReport> {
   process.env['DEFAULT_REQUESTS_PER_MINUTE'] ??= '100000';
   const { dataset, corpus, variant, judge, thresholds } = input;
 
-  const stack = await startStack({ cacheMode: 'off', ...variant.stack });
+  const stack = await startStack({ cacheMode: 'off', ...variant.stack, ...input.stack });
+  const runs = Math.max(1, input.runs ?? 1);
   try {
     for (const doc of corpus.documents) {
       if (variant.skipDocuments?.includes(doc.documentId)) continue;
@@ -47,26 +55,49 @@ export async function runEvaluation(input: RunInput): Promise<EvalReport> {
 
     const informational = thresholds.informationalCategories;
     const results = [];
-    for (const c of dataset.cases) {
-      const caller = dataset.callers[c.caller] as Caller;
-      const seen = await observe(stack, caller, c);
-      const judgement = await judgeAnswer(input.judge, seen);
-      results.push(evaluateCase(c, seen, judgement, !(c.category in informational)));
+    for (let run = 0; run < runs; run++) {
+      for (const c of dataset.cases) {
+        const caller = dataset.callers[c.caller] as Caller;
+        const seen = await observe(stack, caller, c);
+        const judgement = await judgeAnswer(input.judge, seen);
+        results.push(evaluateCase(c, seen, judgement, !(c.category in informational)));
+      }
     }
 
     const gatedResults = results.filter((r) => r.gated);
     const gated = aggregate(gatedResults);
     const categories = byCategory(gatedResults);
+    // Sample size is about how many different questions there are, not how often each was asked.
+    const uniqueCases = new Set(gatedResults.map((r) => r.id)).size;
+    const perCategoryOnce = Object.fromEntries(
+      Object.entries(categories).map(([name, s]) => [name, { ...s, cases: s.cases / runs }]),
+    );
+    const intervals =
+      input.thresholds.confidence !== undefined
+        ? metricIntervals(gatedResults, { level: input.thresholds.confidence.level })
+        : undefined;
+    const passRates = new Map<string, number[]>();
+    for (const r of results) {
+      passRates.set(r.id, [...(passRates.get(r.id) ?? []), r.failures.length === 0 ? 1 : 0]);
+    }
+    const unstable = [...passRates]
+      .map(([id, outcomes]) => ({
+        id,
+        passRate: outcomes.reduce((a, b) => a + b, 0) / outcomes.length,
+      }))
+      .filter((u) => u.passRate > 0 && u.passRate < 1);
     const informationalResults = results.filter((r) => !r.gated);
     const informationalSummary = byCategory(informationalResults);
 
     const meta = await measureJudge(judge, input.judgeExamples);
     const gate = evaluateGate({
       aggregates: gated,
-      categories,
+      categories: perCategoryOnce,
       judgeAccuracy: meta.accuracy,
       thresholds,
       baseline: input.baseline,
+      ...(intervals && { intervals }),
+      uniqueCases,
     });
 
     return {
@@ -76,6 +107,9 @@ export async function runEvaluation(input: RunInput): Promise<EvalReport> {
       gate,
       gated,
       categories,
+      runs,
+      ...(unstable.length > 0 && { unstable }),
+      ...(input.model && { model: input.model }),
       informational: {
         ...(informationalResults.length > 0 && { aggregates: aggregate(informationalResults) }),
         categories: Object.fromEntries(

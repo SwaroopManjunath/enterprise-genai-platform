@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { METRICS, type Aggregates, type CategorySummary, type MetricKey } from './aggregate';
+import type { Interval } from './stats';
 import { DATASETS_DIR } from './dataset';
 
 const metricKeys = Object.keys(METRICS) as [MetricKey, ...MetricKey[]];
@@ -16,6 +17,11 @@ export const thresholdsSchema = z.object({
   minCases: z.object({ total: z.number().int(), perCategory: z.number().int() }),
   /** Reported but not gated, with the reason it is not gated. */
   informationalCategories: z.record(z.string(), z.string()),
+  /**
+   * For a model that does not answer the same way twice: judge each metric by the edge of its
+   * confidence interval that is nearer the limit, instead of by its average.
+   */
+  confidence: z.object({ level: z.number().gt(0.5).lt(1) }).optional(),
   /** The ratchet: how far a metric may move the wrong way from the baseline. */
   regression: z.object({ absolute: z.number(), relativeCost: z.number() }),
 });
@@ -74,8 +80,12 @@ export function evaluateGate(input: {
   judgeAccuracy: number;
   thresholds: Thresholds;
   baseline: Baseline | undefined;
+  /** Present when the evaluation was run several times: see `thresholds.confidence`. */
+  intervals?: Partial<Record<MetricKey, Interval>>;
+  /** Cases the dataset has, which differs from `aggregates.cases` when each was run several times. */
+  uniqueCases?: number;
 }): GateResult {
-  const { aggregates, categories, judgeAccuracy, thresholds, baseline } = input;
+  const { aggregates, categories, judgeAccuracy, thresholds, baseline, intervals } = input;
   const checks: Check[] = [];
 
   for (const [name, bound] of Object.entries(thresholds.metrics) as [
@@ -99,16 +109,25 @@ export function evaluateGate(input: {
       });
       continue;
     }
+    // Zero tolerance (a leak, a forbidden phrase) is never softened by an interval: one is too many.
+    const interval = thresholds.confidence && intervals ? intervals[name] : undefined;
+    const useInterval = interval !== undefined && !(bound.max === 0);
+    const lowest = useInterval && interval ? interval.lower : value;
+    const highest = useInterval && interval ? interval.upper : value;
     const passed =
-      (bound.min === undefined || value >= bound.min) &&
-      (bound.max === undefined || value <= bound.max);
+      (bound.min === undefined || lowest >= bound.min) &&
+      (bound.max === undefined || highest <= bound.max);
+    const spread =
+      useInterval && interval
+        ? ` (${Math.round((thresholds.confidence?.level ?? 0.95) * 100)}% interval ${fmt(interval.lower)} to ${fmt(interval.upper)})`
+        : '';
     checks.push({
       kind: 'threshold',
       name,
       passed,
       value,
       limit: text,
-      message: `${name} is ${fmt(value)}, must be ${text}`,
+      message: `${name} is ${fmt(value)}${spread}, must be ${text}`,
     });
   }
 
@@ -124,10 +143,10 @@ export function evaluateGate(input: {
   checks.push({
     kind: 'sample',
     name: 'cases',
-    passed: aggregates.cases >= thresholds.minCases.total,
-    value: aggregates.cases,
+    passed: (input.uniqueCases ?? aggregates.cases) >= thresholds.minCases.total,
+    value: input.uniqueCases ?? aggregates.cases,
     limit: `at least ${thresholds.minCases.total}`,
-    message: `${aggregates.cases} gated cases, need at least ${thresholds.minCases.total}`,
+    message: `${input.uniqueCases ?? aggregates.cases} gated cases, need at least ${thresholds.minCases.total}`,
   });
   for (const [category, summary] of Object.entries(categories)) {
     checks.push({

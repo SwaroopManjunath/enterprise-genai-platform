@@ -4,19 +4,27 @@
  *   --variant <name>     score a degraded variant instead of the system as it is
  *   --self-test          check that every degraded variant is caught by the gate
  *   --update-baseline    record the current scores as the baseline (a reviewed change)
+ *   --model azure        answer with a real Azure OpenAI deployment (see docs/proof/README.md),
+ *                        judged by the model-based judge, with its own thresholds and baseline
+ *   --runs <n>           run each case n times; the gate then judges a confidence bound, not an average
  */
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { azureFromEnv } from '../../e2e/src/azure-model';
 import { checkDataset, loadCorpus, loadDataset } from './dataset';
 import { loadBaseline, loadThresholds, type Baseline } from './gate';
-import { LexicalJudge } from './judge';
+import { LexicalJudge, LlmJudge, type Judge } from './judge';
 import { loadMetaExamples } from './judge-meta';
 import { renderConsole, renderMarkdown, type EvalReport } from './report';
 import { runEvaluation } from './runner';
 import { VARIANTS, variantNames, type Variant } from './variants';
 
 const ROOT = join(__dirname, '..');
-const BASELINE_FILE = join(ROOT, 'baseline.json');
+const azure =
+  process.argv.includes('--model') && process.argv[process.argv.indexOf('--model') + 1] === 'azure';
+// A real model is held to its own thresholds and baseline: the stand-in's perfect scores say nothing about it.
+const BASELINE_FILE = join(ROOT, azure ? 'baseline.azure.json' : 'baseline.json');
+const THRESHOLDS_FILE = join(ROOT, azure ? 'thresholds.azure.json' : 'thresholds.json');
 const RESULTS_DIR = join(ROOT, 'results');
 
 function option(name: string): string | undefined {
@@ -33,22 +41,30 @@ async function evaluate(variant: Variant, useBaseline = true): Promise<EvalRepor
     console.error(`The dataset is not sound:\n${problems.map((p) => `  - ${p}`).join('\n')}`);
     process.exit(2);
   }
+  const model = azure ? azureFromEnv() : undefined;
+  const judge: Judge = model ? new LlmJudge(model.judge) : new LexicalJudge();
   return runEvaluation({
     dataset,
     corpus,
     variant,
-    judge: new LexicalJudge(),
+    judge,
     judgeExamples: loadMetaExamples(),
-    thresholds: loadThresholds(),
-    baseline: useBaseline ? loadBaseline() : undefined,
+    thresholds: loadThresholds(THRESHOLDS_FILE),
+    baseline: useBaseline ? loadBaseline(BASELINE_FILE) : undefined,
+    runs: Number(option('runs') ?? 1),
+    ...(model && {
+      stack: { providers: [model.provider], prices: model.prices },
+      model: { answers: model.deployment, judge: model.judgeDeployment },
+    }),
   });
 }
 
 function save(report: EvalReport): string {
   mkdirSync(RESULTS_DIR, { recursive: true });
   const markdown = renderMarkdown(report);
-  writeFileSync(join(RESULTS_DIR, `${report.variant}.json`), JSON.stringify(report, null, 2));
-  writeFileSync(join(RESULTS_DIR, `${report.variant}.md`), markdown);
+  const file = azure ? `${report.variant}.azure` : report.variant;
+  writeFileSync(join(RESULTS_DIR, `${file}.json`), JSON.stringify(report, null, 2));
+  writeFileSync(join(RESULTS_DIR, `${file}.md`), markdown);
   return markdown;
 }
 
@@ -117,7 +133,7 @@ async function main(): Promise<number> {
   const report = await evaluate(variant);
   const markdown = save(report);
   console.log(renderConsole(report));
-  console.log(`\nFull report: ${join(RESULTS_DIR, `${name}.md`)}`);
+  console.log(`\nFull report: ${join(RESULTS_DIR, `${azure ? `${name}.azure` : name}.md`)}`);
   const summary = process.env['GITHUB_STEP_SUMMARY'];
   if (summary) appendFileSync(summary, `${markdown}\n`);
   return report.gate.passed ? 0 : 1;

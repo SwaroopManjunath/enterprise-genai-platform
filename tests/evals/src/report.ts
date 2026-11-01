@@ -14,6 +14,12 @@ export interface EvalReport {
     categories: Record<string, CategorySummary & { reason: string }>;
   };
   results: CaseResult[];
+  /** How many times each case was run. More than one for a model that varies. */
+  runs?: number;
+  /** Cases whose outcome differed between runs, with the share of runs that were fully correct. */
+  unstable?: { id: string; passRate: number }[];
+  /** What answered, and what judged, when it was not the stand-in. */
+  model?: { answers: string; judge: string };
 }
 
 const pct = (n: number): string => `${Math.round(n * 100)}%`;
@@ -26,9 +32,15 @@ export function renderMarkdown(report: EvalReport): string {
 
   lines.push(`## Evaluation: ${report.gate.passed ? 'PASSED' : 'FAILED'}`, '');
   lines.push(
-    `Variant \`${report.variant}\`, dataset \`${report.dataset}\`, ${report.gated.cases} gated cases (${report.gated.passed} fully correct), judge \`${report.judge.name}\`.`,
+    `Variant \`${report.variant}\`, dataset \`${report.dataset}\`, ${report.gated.cases} gated case results (${report.gated.passed} fully correct)${report.runs && report.runs > 1 ? `, each case run ${report.runs} times` : ''}, judge \`${report.judge.name}\`.`,
     '',
   );
+  if (report.model) {
+    lines.push(
+      `Answers from \`${report.model.answers}\`, judged by \`${report.model.judge}\`.`,
+      '',
+    );
+  }
 
   if (failedChecks.length > 0) {
     lines.push('### Why it failed', '');
@@ -60,6 +72,18 @@ export function renderMarkdown(report: EvalReport): string {
     lines.push('');
   }
 
+  if (report.unstable && report.unstable.length > 0) {
+    lines.push(
+      `### Unstable cases (${report.unstable.length})`,
+      '',
+      'Right in some runs and wrong in others: the model, not the dataset, is the variable.',
+      '',
+    );
+    for (const u of report.unstable)
+      lines.push(`- \`${u.id}\`: fully correct in ${pct(u.passRate)} of runs`);
+    lines.push('');
+  }
+
   const failed = report.results.filter((r) => r.failures.length > 0);
   if (failed.length > 0) {
     lines.push(`### Cases that went wrong (${failed.length})`, '');
@@ -84,7 +108,7 @@ export function renderMarkdown(report: EvalReport): string {
 export function renderConsole(report: EvalReport): string {
   const out: string[] = [];
   out.push(
-    `Evaluation of variant "${report.variant}" on ${report.gated.cases} gated cases (${report.gated.passed} fully correct)`,
+    `Evaluation of variant "${report.variant}" on ${report.gated.cases} gated case results (${report.gated.passed} fully correct)${report.runs && report.runs > 1 ? `, ${report.runs} runs each` : ''}`,
   );
   out.push('');
   for (const c of report.gate.checks.filter((x) => x.kind === 'threshold' || x.kind === 'judge')) {
