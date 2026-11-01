@@ -15,7 +15,7 @@ import { ModelProtocolError } from '../model/protocol';
 import type { RunStore } from '../store/run-store';
 import { ToolError, type AnyTool, type ToolContext } from '../tools/tool';
 import type { ToolRegistry } from '../tools/tool-registry';
-import { digest, isTimeout, stableStringify, truncate, withTimeout } from './util';
+import { collectStrings, digest, isTimeout, stableStringify, truncate, withTimeout } from './util';
 
 export interface RunnerDeps {
   store: RunStore;
@@ -423,8 +423,13 @@ export class AgentRunner {
       return { text: `error: ${outcome.error}`, withheld: false, truncated: false, signals: [] };
 
     const raw = JSON.stringify(outcome.value) ?? 'null';
-    const screened = guardrails.screenSources([{ text: raw }]);
-    if (screened.kept.length === 0) {
+    // Screen the text as a person or model would read it, never its JSON-escaped form.
+    const strings = collectStrings(outcome.value).map((text) => ({ text }));
+    const screened = guardrails.screenSources([
+      ...strings,
+      { text: strings.map((s) => s.text).join('\n') },
+    ]);
+    if (screened.kept.length < strings.length + 1) {
       return {
         text: 'error: the tool output was withheld because it contained instructions',
         withheld: true,
