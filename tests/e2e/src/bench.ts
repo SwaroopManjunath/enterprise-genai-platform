@@ -4,8 +4,17 @@
  * deterministic stand-in with illustrative prices, so what this measures is the platform's
  * behaviour (calls avoided, spend, how soon the reader sees an answer, wrong hits), not what a real
  * traffic mix or a real model would give. See ADR 0013.
+ *
+ * With `--azure` the same workload runs against a real Azure OpenAI deployment (see
+ * docs/proof/README.md): real latency, real token counts, and the prices in MODEL_*_USD_PER_MTOK.
  */
-import { seedDocuments, startStack, type Caller, type Stack } from './stack';
+import { azureFromEnv, type AzureModel } from './azure-model';
+import { seedDocuments, startStack, type Caller, type Stack, type StackOptions } from './stack';
+
+const model: AzureModel | undefined = process.argv.includes('--azure') ? azureFromEnv() : undefined;
+const modelOptions: StackOptions = model
+  ? { providers: [model.provider], prices: model.prices }
+  : {};
 
 const analyst: Caller = { tenant: 'acme-bank', userId: 'bob', roles: ['analyst'] };
 
@@ -82,7 +91,7 @@ interface Run {
 }
 
 async function run(mode: 'off' | 'shadow' | 'serve', questions: string[]): Promise<Run> {
-  const stack = await startStack({ cacheMode: mode, streamDelayMs: 4 });
+  const stack = await startStack({ cacheMode: mode, streamDelayMs: 4, ...modelOptions });
   try {
     await seedDocuments(stack);
     const waits: number[] = [];
@@ -147,8 +156,11 @@ async function main(): Promise<void> {
   console.log(
     `Workload: ${questions.length} requests, ${distinct} distinct wordings (70% repeat questions in assorted wordings, 30% unique).`,
   );
+  const price = model?.prices[model.name];
   console.log(
-    'Model: deterministic stand-in at illustrative prices ($2.50 in / $10 out per million tokens).\n',
+    model
+      ? `Model: Azure OpenAI deployment "${model.deployment}", ${price ? `at $${price.inputPerMTok} in / $${price.outputPerMTok} out per million tokens` : 'unpriced (set MODEL_INPUT_USD_PER_MTOK and MODEL_OUTPUT_USD_PER_MTOK)'}.\n`
+      : 'Model: deterministic stand-in at illustrative prices ($2.50 in / $10 out per million tokens).\n',
   );
 
   const off = await run('off', questions);
@@ -173,7 +185,7 @@ async function main(): Promise<void> {
     `Shadow mode (nothing served): ${fmt((shadow.shadowAgreement ?? 0) * 100)}% of the answers it would have served matched a fresh one.`,
   );
 
-  const stack = await startStack({ cacheMode: 'serve' });
+  const stack = await startStack({ cacheMode: 'serve', ...modelOptions });
   try {
     await seedDocuments(stack);
     const check = await wrongHits(stack);

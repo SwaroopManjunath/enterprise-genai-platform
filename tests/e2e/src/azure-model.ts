@@ -11,6 +11,7 @@ import type { LlmProvider } from '../../../apps/llm-gateway/src/llm/types';
  *   AZURE_OPENAI_API_VERSION   optional, default 2024-10-21
  *   AZURE_JUDGE_DEPLOYMENT     optional: a different deployment to judge answers
  *   MODEL_INPUT_USD_PER_MTOK / MODEL_OUTPUT_USD_PER_MTOK   the contract's prices, for cost numbers
+ *   AZURE_OPENAI_NO_TEMPERATURE=1   for models that refuse a temperature setting
  */
 export interface AzureModel {
   provider: LlmProvider;
@@ -67,7 +68,7 @@ export function azureFromEnv(env: NodeJS.ProcessEnv = process.env, timeoutMs = 6
       (
         await judgeProvider.chat({
           messages: [{ role: 'user', content: prompt }],
-          temperature: 0,
+          ...(env['AZURE_OPENAI_NO_TEMPERATURE'] !== '1' && { temperature: 0 }),
         })
       ).message.content,
   };

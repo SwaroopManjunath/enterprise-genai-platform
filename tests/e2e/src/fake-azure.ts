@@ -16,7 +16,11 @@ export interface FakeAzure {
 
 const mock = new GroundedMockProvider();
 
-export async function startFakeAzure(apiKey: string, port = 0): Promise<FakeAzure> {
+export async function startFakeAzure(
+  apiKey: string,
+  port = 0,
+  host = '127.0.0.1',
+): Promise<FakeAzure> {
   const requests: FakeAzure['requests'] = [];
   const server: Server = createServer((req, res) => {
     void (async () => {
@@ -76,9 +80,9 @@ export async function startFakeAzure(apiKey: string, port = 0): Promise<FakeAzur
       res.end();
     });
   });
-  await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) => server.listen(port, host, resolve));
   return {
-    url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    url: `http://${host === '0.0.0.0' ? '127.0.0.1' : host}:${(server.address() as AddressInfo).port}`,
     requests,
     close: () => new Promise((resolve) => server.close(() => resolve())),
   };
@@ -88,6 +92,7 @@ if (require.main === module) {
   void startFakeAzure(
     process.env['AZURE_OPENAI_API_KEY'] ?? 'fake-key',
     Number(process.env['PORT'] ?? 4010),
+    process.env['HOST'] ?? '127.0.0.1',
   ).then((f) => {
     console.log(`fake Azure OpenAI on ${f.url} (api key: AZURE_OPENAI_API_KEY or "fake-key")`);
   });

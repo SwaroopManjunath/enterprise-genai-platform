@@ -3,209 +3,273 @@
   "rows": [
     {
       "rate": 10,
-      "requests": 301,
-      "achieved": 10.024611614809487,
+      "requests": 300,
+      "achieved": 9.999362290669913,
       "failedShare": 0,
       "refusals": 0,
       "dropped": 0,
-      "p50": 16.635875,
-      "p95": 65.538708,
-      "p99": 358.040791,
-      "max": 571.746958,
-      "avg": 27.770562401993356,
+      "p50": 16.3134375,
+      "p95": 21.84947325,
+      "p99": 27.950741989999987,
+      "max": 117.973958,
+      "avg": 15.199067906666668,
       "cacheHits": 0,
-      "tokens": 77654,
-      "grounded": 242
-    },
-    {
-      "rate": 25,
-      "requests": 750,
-      "achieved": 24.997805609297597,
-      "failedShare": 0,
-      "refusals": 0,
-      "dropped": 0,
-      "p50": 8.157729499999999,
-      "p95": 15.12745365,
-      "p99": 25.75791691999999,
-      "max": 65.454333,
-      "avg": 8.945455219999994,
-      "cacheHits": 0,
-      "tokens": 191453,
-      "grounded": 620
+      "tokens": 76962,
+      "grounded": 244
     },
     {
       "rate": 50,
       "requests": 1500,
-      "achieved": 49.995303357877056,
+      "achieved": 49.99485976516128,
       "failedShare": 0,
       "refusals": 0,
       "dropped": 0,
-      "p50": 4.789,
-      "p95": 8.96679549999999,
-      "p99": 13.477406989999997,
-      "max": 18.137125,
-      "avg": 5.32407666600001,
+      "p50": 4.7463125,
+      "p95": 8.23733335,
+      "p99": 12.450485499999997,
+      "max": 24.520916,
+      "avg": 5.172333368000003,
       "cacheHits": 0,
-      "tokens": 381670,
-      "grounded": 1218
+      "tokens": 382763,
+      "grounded": 1224
     },
     {
       "rate": 100,
       "requests": 3001,
-      "achieved": 100.0064247979587,
+      "achieved": 100.01598556063784,
       "failedShare": 0,
       "refusals": 0,
       "dropped": 0,
-      "p50": 3.535209,
-      "p95": 8.193833,
-      "p99": 16.280292,
-      "max": 156.870292,
-      "avg": 4.896247773742084,
+      "p50": 3.51375,
+      "p95": 7.221708,
+      "p99": 12.966917,
+      "max": 64.071042,
+      "avg": 4.1173783305564875,
       "cacheHits": 0,
-      "tokens": 770798,
-      "grounded": 2461
+      "tokens": 763516,
+      "grounded": 2453
     },
     {
       "rate": 200,
       "requests": 6001,
-      "achieved": 199.99810366737233,
+      "achieved": 200.0077537283519,
       "failedShare": 0,
       "refusals": 0,
       "dropped": 0,
-      "p50": 2.89325,
-      "p95": 7.840583,
-      "p99": 15.44475,
-      "max": 30.907125,
-      "avg": 3.637880541243124,
+      "p50": 2.857208,
+      "p95": 6.306916,
+      "p99": 12.331083,
+      "max": 28.120416,
+      "avg": 3.3912410408265314,
       "cacheHits": 0,
-      "tokens": 1524550,
-      "grounded": 4909
+      "tokens": 1523608,
+      "grounded": 4916
     },
     {
       "rate": 400,
-      "requests": 12001,
-      "achieved": 399.97325735007934,
+      "requests": 12003,
+      "achieved": 380.7822153545574,
       "failedShare": 0,
       "refusals": 0,
       "dropped": 0,
-      "p50": 3.184875,
-      "p95": 23.816083,
-      "p99": 73.5235,
-      "max": 224.720792,
-      "avg": 7.480908867844405,
+      "p50": 3.235333,
+      "p95": 117.73490799999931,
+      "p99": 1533.8065781599998,
+      "max": 1743.901792,
+      "avg": 44.260237884195696,
       "cacheHits": 0,
-      "tokens": 3052126,
-      "grounded": 9818
+      "tokens": 3050968,
+      "grounded": 9941
+    },
+    {
+      "rate": 600,
+      "requests": 15515,
+      "achieved": 385.31380902581645,
+      "failedShare": 0.0027715114405414115,
+      "refusals": 0,
+      "dropped": 2486,
+      "p50": 665.1345,
+      "p95": 9002.697783699985,
+      "p99": 24152.378552739985,
+      "max": 27189.081707,
+      "avg": 1757.014100414948,
+      "cacheHits": 0,
+      "tokens": 3939048,
+      "grounded": 12698
+    },
+    {
+      "rate": 800,
+      "requests": 19927,
+      "achieved": 441.2306477786742,
+      "failedShare": 0.010137000050183169,
+      "refusals": 0,
+      "dropped": 4074,
+      "p50": 1069.219375,
+      "p95": 1704.1884180999996,
+      "p99": 26799.78885532,
+      "max": 29690.364374,
+      "avg": 1881.4498571759384,
+      "cacheHits": 0,
+      "tokens": 5031183,
+      "grounded": 16264
+    },
+    {
+      "rate": 1000,
+      "requests": 17694,
+      "achieved": 299.955980737654,
+      "failedShare": 0.07906635017520064,
+      "refusals": 0,
+      "dropped": 12309,
+      "p50": 1031.430563,
+      "p95": 5123.1088316,
+      "p99": 32804.07609094,
+      "max": 52980.935621,
+      "avg": 2462.9842932460715,
+      "cacheHits": 0,
+      "tokens": 4134765,
+      "grounded": 13343
     }
   ],
   "totals": {
-    "calls": 22765,
-    "fallbacks": null,
-    "errors": null,
-    "rejected": null,
-    "promptTokens": 5686837,
-    "completionTokens": 319263,
+    "calls": 71683,
+    "fallbacks": 0,
+    "errors": 0,
+    "rejected": 0,
+    "promptTokens": 17903324,
+    "completionTokens": 1007663,
     "microUsd": 0,
-    "cacheHit": null,
-    "answers": 23584
+    "cacheHit": 0,
+    "answers": 74328
   },
-  "alerts": ["AnswerGroundingDripBurn (pending)"],
+  "alerts": [],
   "peaks": {
     "10|llm-gateway": {
-      "cpu": 6.46,
-      "mem": 50.09
-    },
-    "10|retrieval": {
-      "cpu": 19.55,
-      "mem": 52.75
+      "cpu": 3.11,
+      "mem": 47.23
     },
     "10|prompt-registry": {
-      "cpu": 10.38,
-      "mem": 48.73
+      "cpu": 12.99,
+      "mem": 50.65
+    },
+    "10|retrieval": {
+      "cpu": 9.83,
+      "mem": 52.05
     },
     "10|assistant": {
-      "cpu": 27.97,
-      "mem": 84.39
-    },
-    "25|llm-gateway": {
-      "cpu": 14.09,
-      "mem": 73.92
-    },
-    "25|retrieval": {
-      "cpu": 10.66,
-      "mem": 75.38
-    },
-    "25|prompt-registry": {
-      "cpu": 16.55,
-      "mem": 58.2
-    },
-    "25|assistant": {
-      "cpu": 20.03,
-      "mem": 90.43
+      "cpu": 15.87,
+      "mem": 83.04
     },
     "50|llm-gateway": {
-      "cpu": 13.38,
-      "mem": 74.92
-    },
-    "50|retrieval": {
-      "cpu": 11.48,
-      "mem": 80.76
+      "cpu": 9.84,
+      "mem": 73.77
     },
     "50|prompt-registry": {
-      "cpu": 10.63,
-      "mem": 75.74
+      "cpu": 11.97,
+      "mem": 75.8
+    },
+    "50|retrieval": {
+      "cpu": 12.94,
+      "mem": 77.23
     },
     "50|assistant": {
-      "cpu": 20.14,
-      "mem": 93.95
+      "cpu": 29.4,
+      "mem": 94.58
     },
     "100|llm-gateway": {
-      "cpu": 25.1,
-      "mem": 77.85
-    },
-    "100|retrieval": {
-      "cpu": 14.88,
-      "mem": 87.8
+      "cpu": 23.44,
+      "mem": 73.86
     },
     "100|prompt-registry": {
-      "cpu": 12.23,
-      "mem": 82.82
+      "cpu": 22.36,
+      "mem": 78.73
+    },
+    "100|retrieval": {
+      "cpu": 16.13,
+      "mem": 83.66
     },
     "100|assistant": {
-      "cpu": 48.71,
-      "mem": 132.6
+      "cpu": 31.33,
+      "mem": 121.5
     },
     "200|llm-gateway": {
-      "cpu": 24.32,
-      "mem": 81.6
-    },
-    "200|retrieval": {
-      "cpu": 32.22,
-      "mem": 90.83
+      "cpu": 22.13,
+      "mem": 81.94
     },
     "200|prompt-registry": {
-      "cpu": 16.33,
-      "mem": 85.3
+      "cpu": 21.81,
+      "mem": 83.21
+    },
+    "200|retrieval": {
+      "cpu": 28.21,
+      "mem": 87.82
     },
     "200|assistant": {
-      "cpu": 59.47,
-      "mem": 214.6
+      "cpu": 52.66,
+      "mem": 207.6
     },
     "400|llm-gateway": {
-      "cpu": 33.2,
-      "mem": 93.24
-    },
-    "400|retrieval": {
-      "cpu": 34.39,
-      "mem": 109.7
+      "cpu": 34.97,
+      "mem": 86.8
     },
     "400|prompt-registry": {
-      "cpu": 26.29,
-      "mem": 88.35
+      "cpu": 37.04,
+      "mem": 85
+    },
+    "400|retrieval": {
+      "cpu": 39.57,
+      "mem": 102.2
     },
     "400|assistant": {
-      "cpu": 91.06,
-      "mem": 232.1
+      "cpu": 118.21,
+      "mem": 252.9
+    },
+    "600|llm-gateway": {
+      "cpu": 53.27,
+      "mem": 140.1
+    },
+    "600|prompt-registry": {
+      "cpu": 53.53,
+      "mem": 130.5
+    },
+    "600|retrieval": {
+      "cpu": 60.65,
+      "mem": 161.2
+    },
+    "600|assistant": {
+      "cpu": 156.4,
+      "mem": 377.2
+    },
+    "800|llm-gateway": {
+      "cpu": 44,
+      "mem": 144.4
+    },
+    "800|prompt-registry": {
+      "cpu": 38.83,
+      "mem": 131.4
+    },
+    "800|retrieval": {
+      "cpu": 51.1,
+      "mem": 161.8
+    },
+    "800|assistant": {
+      "cpu": 149.2,
+      "mem": 435.7
+    },
+    "1000|llm-gateway": {
+      "cpu": 42.23,
+      "mem": 157.7
+    },
+    "1000|prompt-registry": {
+      "cpu": 63.43,
+      "mem": 156.5
+    },
+    "1000|retrieval": {
+      "cpu": 49.05,
+      "mem": 161.6
+    },
+    "1000|assistant": {
+      "cpu": 148.75,
+      "mem": 430.6
     }
   }
 }
