@@ -4,3 +4,7 @@
 /tests/evals/baseline.json     @SwaroopManjunath
 /tests/evals/datasets/         @SwaroopManjunath
 /.github/workflows/            @SwaroopManjunath
+# What telemetry may carry, and the targets alerts hold the platform to.
+/packages/observability/src/sanitize.ts   @SwaroopManjunath
+/packages/observability/src/slo/          @SwaroopManjunath
+/ops/                                     @SwaroopManjunath

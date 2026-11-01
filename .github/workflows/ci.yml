@@ -37,6 +37,8 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm test
+      - name: Alert rules and dashboard match their definitions
+        run: npm run ops:check
 
       # Quality gate: the system is run against a labelled dataset and the build fails if answers
       # get worse (see tests/evals/README.md). The report is also shown on the run's summary page.
