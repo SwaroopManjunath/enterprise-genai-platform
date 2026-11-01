@@ -14,6 +14,8 @@ export interface ToolCall {
   id: string;
   name: string;
   arguments: Record<string, unknown>;
+  /** The model's stated reason for the call. Untrusted text: a claim, not a fact. */
+  reason?: string;
 }
 
 /**
@@ -24,8 +26,6 @@ export interface PendingApproval {
   call: ToolCall;
   /** Human-readable description of the action, written by the tool. */
   summary: string;
-  /** The model's stated reason, for the approver (untrusted text: it is the model's claim). */
-  reason?: string;
   requestedAt: string;
 }
 
