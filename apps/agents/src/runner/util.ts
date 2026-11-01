@@ -47,3 +47,24 @@ export function withTimeout<T>(
 
 export const truncate = (text: string, max: number): string =>
   text.length > max ? `${text.slice(0, max)}…` : text;
+
+/**
+ * Every string inside a value, with its nesting limited. Used to screen structured tool output
+ * leaf by leaf: JSON-encoding it first would turn a newline into a literal backslash-n and glue it
+ * to the next word ("\\nIGNORE"), which hides an instruction from the detector.
+ */
+export function collectStrings(
+  value: unknown,
+  maxStrings = 200,
+  depth = 0,
+  out: string[] = [],
+): string[] {
+  if (out.length >= maxStrings || depth > 8) return out;
+  if (typeof value === 'string') out.push(value);
+  else if (Array.isArray(value))
+    value.forEach((v) => collectStrings(v, maxStrings, depth + 1, out));
+  else if (value && typeof value === 'object') {
+    Object.values(value).forEach((v) => collectStrings(v, maxStrings, depth + 1, out));
+  }
+  return out;
+}
