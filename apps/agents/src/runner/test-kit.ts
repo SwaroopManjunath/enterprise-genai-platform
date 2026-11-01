@@ -6,6 +6,7 @@ import type { AgentModel, ModelRequest, ModelResponse } from '../model/agent-mod
 import type { ModelStep } from '../model/protocol';
 import { InMemoryRunStore } from '../store/run-store';
 import { ToolError, type AnyTool, type ToolContext, type ToolRisk } from '../tools/tool';
+import { StaticToolCatalog } from '../tools/tool-catalog';
 import { ToolRegistry } from '../tools/tool-registry';
 import { AgentRunner } from './agent-runner';
 
@@ -122,7 +123,7 @@ export function buildRunner(options: {
   const runner = new AgentRunner({
     store,
     model: options.model,
-    tools: new ToolRegistry(options.tools),
+    tools: new StaticToolCatalog(new ToolRegistry(options.tools)),
     guardrails: options.guardrails ?? new Guardrails({ mode: 'enforce' }),
     obo: { exchange: (_token, scope) => Promise.resolve(`obo:${scope}`) },
     gatewayScope: 'api://gateway/.default',

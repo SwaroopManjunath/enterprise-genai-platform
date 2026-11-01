@@ -13,6 +13,9 @@ const envSchema = z
 
     GATEWAY_URL: z.string().url().default('http://localhost:3000'),
     RETRIEVAL_URL: z.string().url().default('http://localhost:3003'),
+    /** Optional: without it the agent has only its built-in tools. */
+    MCP_GATEWAY_URL: z.string().url().optional(),
+    MCP_GATEWAY_SCOPE: z.string().min(1).default('api://mcp-gateway/.default'),
     GATEWAY_SCOPE: z.string().min(1).default('api://gateway/.default'),
     RETRIEVAL_SCOPE: z.string().min(1).default('api://retrieval/.default'),
 
@@ -62,6 +65,8 @@ export interface AgentsConfig {
   port: number;
   gateway: { url: string; scope: string };
   retrieval: { url: string; scope: string };
+  /** Present only when an MCP gateway is configured. */
+  mcp?: { url: string; scope: string };
   obo: { tokenEndpoint: string; clientId: string; clientSecretName: string };
   limits: AgentLimits;
   emailAllowedDomains: string[];
@@ -77,6 +82,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AgentsConfig {
     port: e.PORT,
     gateway: { url: e.GATEWAY_URL, scope: e.GATEWAY_SCOPE },
     retrieval: { url: e.RETRIEVAL_URL, scope: e.RETRIEVAL_SCOPE },
+    ...(e.MCP_GATEWAY_URL && { mcp: { url: e.MCP_GATEWAY_URL, scope: e.MCP_GATEWAY_SCOPE } }),
     obo: {
       tokenEndpoint: e.OBO_TOKEN_ENDPOINT,
       clientId: e.OBO_CLIENT_ID,

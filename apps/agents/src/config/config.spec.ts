@@ -48,4 +48,13 @@ describe('loadConfig', () => {
   it('only ever holds the name of the client secret', () => {
     expect(loadConfig(required).obo.clientSecretName).toBe('agents-client-secret');
   });
+
+  it('has no MCP gateway unless one is configured', () => {
+    expect(loadConfig(required).mcp).toBeUndefined();
+    expect(loadConfig({ ...required, MCP_GATEWAY_URL: 'http://mcp.test' }).mcp).toEqual({
+      url: 'http://mcp.test',
+      scope: 'api://mcp-gateway/.default',
+    });
+    expect(() => loadConfig({ ...required, MCP_GATEWAY_URL: 'not a url' })).toThrow();
+  });
 });
