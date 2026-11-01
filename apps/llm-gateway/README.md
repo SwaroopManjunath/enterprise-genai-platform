@@ -13,11 +13,13 @@ flowchart TD
     C -- no --> E2[429 + Retry-After]
     C -- yes --> D{daily token quota left?}
     D -- no --> E3[429 quota_exceeded]
-    D -- yes --> P[Primary deployment]
+    D -- yes --> G{daily cost budget left?}
+    G -- no --> E5[429 budget_exceeded]
+    G -- yes --> P[Primary deployment]
     P -- 429/5xx/timeout --> R[retry with backoff + jitter]
     R -- still failing --> F[Next deployment]
     F -- all failed --> E4[503]
-    P -- ok --> OK[200 + usage]
+    P -- ok --> OK[200 + usage + cost]
     F -- ok --> OK
 ```
 
@@ -55,11 +57,44 @@ no tenant header to spoof. `GET /health` is public. Optional `x-request-id` is a
 | 400    | `upstream_rejected_request` | Model rejected the request itself            |
 | 429    | `rate_limited`              | Too many requests; see `Retry-After`         |
 | 429    | `quota_exceeded`            | Tenant's daily token budget is spent         |
+| 429    | `budget_exceeded`           | Tenant's daily cost budget is spent          |
 | 503    | `upstream_unavailable`      | Every configured deployment failed           |
+
+## Cost
+
+Every response carries `cost: { microUsd, priced }`: the token counts from the upstream, times the
+deployment's price. Prices are dollars per million tokens in `MODEL_PRICES` (a JSON object keyed by
+deployment name); tokens times price is already in micro-dollars, so every amount is an integer. A
+deployment with no price is reported as `priced: false` and counted apart, never as free.
+
+`GET /v1/usage?days=7` (role `cost-viewer`, own tenant only) returns today's spend, the budget and what
+is left of it when `DAILY_COST_BUDGET_USD` is set, and per-day totals by deployment, including how many
+requests were streamed, estimated or unpriced.
+
+## Streaming
+
+Add `"stream": true` to the request to receive server-sent events instead of one JSON body:
+
+```text
+event: delta
+data: {"text":"Refunds take ","provider":"aoai-westeurope","fallbackUsed":false}
+
+event: done
+data: {"finishReason":"stop","usage":{...},"provider":"...","fallbackUsed":false,"cost":{...},"estimated":false}
+```
+
+Everything that can refuse the request (rate limit, quota, budget, every deployment down, a bad body)
+is decided before the first byte, so those are still ordinary JSON errors with the usual status codes;
+only a failure after the stream began is reported in-band, as an `error` event. Retry and fallback work
+up to the first piece of text; a deployment that fails after that fails the stream instead of silently
+starting a second answer. If the client hangs up the upstream call is stopped, and what was generated is
+billed as an estimate (`estimated: true`, counted in `estimatedRequests`), because the deployment still
+charged for it. A stream with no token counts from the upstream is estimated the same way.
 
 ## Design
 
-See [ADR 0003](../../docs/adr/0003-gateway-resilience-and-limits.md).
+See [ADR 0003](../../docs/adr/0003-gateway-resilience-and-limits.md) and
+[ADR 0013](../../docs/adr/0013-cost-and-performance.md).
 
 ## Tests
 
