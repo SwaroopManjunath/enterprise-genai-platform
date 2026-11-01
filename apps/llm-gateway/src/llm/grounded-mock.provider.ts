@@ -45,6 +45,9 @@ const sameWord = (a: string, b: string): boolean =>
  * This is a test double, not a language model: it quotes the first sentence of the best-matching
  * source. Real answer quality is the job of Azure OpenAI and, later, the evaluation pipeline.
  */
+/** The share of the question's content words a source must cover before the stand-in answers from it. */
+const MIN_COVERAGE = 0.5;
+
 export class GroundedMockProvider implements LlmProvider {
   readonly name = 'mock-grounded';
   calls = 0;
@@ -85,7 +88,13 @@ export class GroundedMockProvider implements LlmProvider {
       const overlap = queryWords.filter((q) => bodyWords.some((b) => sameWord(q, b))).length;
       if (overlap > (best?.overlap ?? 0)) best = { source, overlap };
     }
-    if (!best) return 'I do not know based on the provided sources.';
+    // A source that shares one word with the question is not an answer to it. A real model would
+    // say it does not know; so does the stand-in, unless the source covers at least half of what
+    // was asked. (The first evaluation run found it answering a salary question with a sentence
+    // about line managers.)
+    if (!best || best.overlap / queryWords.length < MIN_COVERAGE) {
+      return 'I do not know based on the provided sources.';
+    }
 
     const sentence =
       best.source.body

@@ -26,6 +26,12 @@ export class ScriptedAgentProvider extends GullibleProvider {
   private position = 0;
   private repeatLast = false;
 
+  /**
+   * Changes what the stand-in model says to the assistant (not to the agent), after it has answered.
+   * The evaluation uses it to play a model that has got worse and check that the gate notices.
+   */
+  transform?: (content: string, request: ChatRequest) => string;
+
   respondWith(replies: AgentReply[], options: { repeatLast?: boolean } = {}): void {
     this.script = replies;
     this.agentRequests.length = 0;
@@ -33,9 +39,16 @@ export class ScriptedAgentProvider extends GullibleProvider {
     this.repeatLast = options.repeatLast ?? false;
   }
 
-  override chat(request: ChatRequest): Promise<ChatResult> {
+  override async chat(request: ChatRequest): Promise<ChatResult> {
     const system = request.messages.find((m) => m.role === 'system')?.content ?? '';
-    if (!AGENT_PROMPT.test(system)) return super.chat(request);
+    if (!AGENT_PROMPT.test(system)) {
+      const result = await super.chat(request);
+      if (!this.transform) return result;
+      return {
+        ...result,
+        message: { ...result.message, content: this.transform(result.message.content, request) },
+      };
+    }
 
     this.received.push(request.messages);
     this.agentRequests.push(request.messages);

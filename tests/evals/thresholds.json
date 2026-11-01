@@ -1,0 +1,24 @@
+{
+  "metrics": {
+    "caseAccuracy": { "min": 0.95 },
+    "retrievalRecallAtK": { "min": 0.9 },
+    "retrievalMRR": { "min": 0.8 },
+    "retrievalLeaks": { "max": 0 },
+    "answerRate": { "min": 0.95 },
+    "abstentionAccuracy": { "min": 0.95 },
+    "blockAccuracy": { "min": 1 },
+    "factRecall": { "min": 0.9 },
+    "groundedness": { "min": 0.95 },
+    "citationPrecision": { "min": 0.95 },
+    "citationRecall": { "min": 0.9 },
+    "forbiddenRate": { "max": 0 },
+    "avgTokens": { "max": 320 }
+  },
+  "judgeAccuracy": { "min": 0.9 },
+  "minCases": { "total": 30, "perCategory": 2 },
+  "informationalCategories": {
+    "multi-source": "The stand-in model answers from one source, so it cannot combine two. A real model should: gate it once one is evaluated (Step 15).",
+    "known-gaps": "A question with a single injection signal is not blocked by design (ADR 0010: only combinations are), so a naive model can obey it. Reported so the gap stays visible; closing it means a lower threshold or a check on the answer."
+  },
+  "regression": { "absolute": 0.02, "relativeCost": 0.05 }
+}

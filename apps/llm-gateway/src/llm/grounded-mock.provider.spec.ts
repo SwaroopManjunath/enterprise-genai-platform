@@ -58,6 +58,24 @@ describe('GroundedMockProvider', () => {
     expect(reply).not.toMatch(/\[\d+\]/);
   });
 
+  it('does not answer from a source that shares only a word with the question', async () => {
+    const reply = await ask(
+      'What are the salary bands for managers?',
+      '[1] Onboarding\nThe line manager requests access to internal systems.',
+    );
+
+    expect(reply).toBe('I do not know based on the provided sources.');
+  });
+
+  it('still answers when the source covers at least half of the question', async () => {
+    const reply = await ask(
+      'Who requests system access for new staff?',
+      '[1] Onboarding\nThe line manager requests access to internal systems.',
+    );
+
+    expect(reply).toMatch(/line manager requests access.*\[1\]/);
+  });
+
   it('says it does not know when there are no sources at all', async () => {
     expect(await ask('refunds', 'no sources here')).toMatch(/do not know/);
   });
