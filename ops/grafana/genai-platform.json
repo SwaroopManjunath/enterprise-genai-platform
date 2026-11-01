@@ -522,7 +522,7 @@
       "id": 11,
       "type": "stat",
       "title": "Answer grounding: budget left (30d)",
-      "description": "An answer that was generated cites the sources it came from. Objective 90.0%. 100% means none of the budget is spent; below 0 it is overspent.",
+      "description": "An answer that was generated cites the sources it came from (a stated \"I do not know\" is not counted either way). Objective 90.0%. 100% means none of the budget is spent; below 0 it is overspent.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"

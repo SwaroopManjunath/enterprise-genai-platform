@@ -1,8 +1,10 @@
 # Answer grounding
 
 **Alerts:** `AnswerGrounding{Steady,Drip}Burn` (tickets, never pages). **SLO:** 90% of generated answers
-cite the sources they came from. It counts `grounded` against `ungrounded`; refusals, cache hits and
-"no sources" answers are left out.
+cite the sources they came from. It counts `grounded` against `ungrounded`; refusals, cache hits,
+"no sources" answers and a stated "I do not know" (`abstained`) are left out. A burst of questions the
+documents cannot answer therefore does not spend this budget, but it is worth a look in itself: it
+means the documents have a gap.
 
 This is a quality signal. It cannot say an answer is true, only that it carries citations that map to
 retrieved sources. The evaluation gate (ADR 0014) is what judges truth.

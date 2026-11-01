@@ -1,0 +1,211 @@
+{
+  "name": "capacity-mock",
+  "rows": [
+    {
+      "rate": 10,
+      "requests": 301,
+      "achieved": 10.024611614809487,
+      "failedShare": 0,
+      "refusals": 0,
+      "dropped": 0,
+      "p50": 16.635875,
+      "p95": 65.538708,
+      "p99": 358.040791,
+      "max": 571.746958,
+      "avg": 27.770562401993356,
+      "cacheHits": 0,
+      "tokens": 77654,
+      "grounded": 242
+    },
+    {
+      "rate": 25,
+      "requests": 750,
+      "achieved": 24.997805609297597,
+      "failedShare": 0,
+      "refusals": 0,
+      "dropped": 0,
+      "p50": 8.157729499999999,
+      "p95": 15.12745365,
+      "p99": 25.75791691999999,
+      "max": 65.454333,
+      "avg": 8.945455219999994,
+      "cacheHits": 0,
+      "tokens": 191453,
+      "grounded": 620
+    },
+    {
+      "rate": 50,
+      "requests": 1500,
+      "achieved": 49.995303357877056,
+      "failedShare": 0,
+      "refusals": 0,
+      "dropped": 0,
+      "p50": 4.789,
+      "p95": 8.96679549999999,
+      "p99": 13.477406989999997,
+      "max": 18.137125,
+      "avg": 5.32407666600001,
+      "cacheHits": 0,
+      "tokens": 381670,
+      "grounded": 1218
+    },
+    {
+      "rate": 100,
+      "requests": 3001,
+      "achieved": 100.0064247979587,
+      "failedShare": 0,
+      "refusals": 0,
+      "dropped": 0,
+      "p50": 3.535209,
+      "p95": 8.193833,
+      "p99": 16.280292,
+      "max": 156.870292,
+      "avg": 4.896247773742084,
+      "cacheHits": 0,
+      "tokens": 770798,
+      "grounded": 2461
+    },
+    {
+      "rate": 200,
+      "requests": 6001,
+      "achieved": 199.99810366737233,
+      "failedShare": 0,
+      "refusals": 0,
+      "dropped": 0,
+      "p50": 2.89325,
+      "p95": 7.840583,
+      "p99": 15.44475,
+      "max": 30.907125,
+      "avg": 3.637880541243124,
+      "cacheHits": 0,
+      "tokens": 1524550,
+      "grounded": 4909
+    },
+    {
+      "rate": 400,
+      "requests": 12001,
+      "achieved": 399.97325735007934,
+      "failedShare": 0,
+      "refusals": 0,
+      "dropped": 0,
+      "p50": 3.184875,
+      "p95": 23.816083,
+      "p99": 73.5235,
+      "max": 224.720792,
+      "avg": 7.480908867844405,
+      "cacheHits": 0,
+      "tokens": 3052126,
+      "grounded": 9818
+    }
+  ],
+  "totals": {
+    "calls": 22765,
+    "fallbacks": null,
+    "errors": null,
+    "rejected": null,
+    "promptTokens": 5686837,
+    "completionTokens": 319263,
+    "microUsd": 0,
+    "cacheHit": null,
+    "answers": 23584
+  },
+  "alerts": ["AnswerGroundingDripBurn (pending)"],
+  "peaks": {
+    "10|llm-gateway": {
+      "cpu": 6.46,
+      "mem": 50.09
+    },
+    "10|retrieval": {
+      "cpu": 19.55,
+      "mem": 52.75
+    },
+    "10|prompt-registry": {
+      "cpu": 10.38,
+      "mem": 48.73
+    },
+    "10|assistant": {
+      "cpu": 27.97,
+      "mem": 84.39
+    },
+    "25|llm-gateway": {
+      "cpu": 14.09,
+      "mem": 73.92
+    },
+    "25|retrieval": {
+      "cpu": 10.66,
+      "mem": 75.38
+    },
+    "25|prompt-registry": {
+      "cpu": 16.55,
+      "mem": 58.2
+    },
+    "25|assistant": {
+      "cpu": 20.03,
+      "mem": 90.43
+    },
+    "50|llm-gateway": {
+      "cpu": 13.38,
+      "mem": 74.92
+    },
+    "50|retrieval": {
+      "cpu": 11.48,
+      "mem": 80.76
+    },
+    "50|prompt-registry": {
+      "cpu": 10.63,
+      "mem": 75.74
+    },
+    "50|assistant": {
+      "cpu": 20.14,
+      "mem": 93.95
+    },
+    "100|llm-gateway": {
+      "cpu": 25.1,
+      "mem": 77.85
+    },
+    "100|retrieval": {
+      "cpu": 14.88,
+      "mem": 87.8
+    },
+    "100|prompt-registry": {
+      "cpu": 12.23,
+      "mem": 82.82
+    },
+    "100|assistant": {
+      "cpu": 48.71,
+      "mem": 132.6
+    },
+    "200|llm-gateway": {
+      "cpu": 24.32,
+      "mem": 81.6
+    },
+    "200|retrieval": {
+      "cpu": 32.22,
+      "mem": 90.83
+    },
+    "200|prompt-registry": {
+      "cpu": 16.33,
+      "mem": 85.3
+    },
+    "200|assistant": {
+      "cpu": 59.47,
+      "mem": 214.6
+    },
+    "400|llm-gateway": {
+      "cpu": 33.2,
+      "mem": 93.24
+    },
+    "400|retrieval": {
+      "cpu": 34.39,
+      "mem": 109.7
+    },
+    "400|prompt-registry": {
+      "cpu": 26.29,
+      "mem": 88.35
+    },
+    "400|assistant": {
+      "cpu": 91.06,
+      "mem": 232.1
+    }
+  }
+}

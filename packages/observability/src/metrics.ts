@@ -28,7 +28,7 @@ export const CATALOG = {
     kind: 'counter',
     unit: '{answer}',
     description:
-      'Answers by outcome: grounded, ungrounded, no_sources, blocked, cache_hit or error',
+      'Answers by outcome: grounded, ungrounded, abstained, no_sources, blocked, cache_hit or error',
     labels: ['outcome', 'cache'],
   },
   firstToken: {

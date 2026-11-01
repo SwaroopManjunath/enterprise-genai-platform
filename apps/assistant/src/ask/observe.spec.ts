@@ -45,7 +45,21 @@ const counts = async (name: string) =>
 describe('outcomeOf', () => {
   it.each([
     ['a cited answer', result(), 'grounded'],
-    ['an answer with no citation', result({ grounded: false }), 'ungrounded'],
+    [
+      'an answer with no citation',
+      result({ grounded: false, answer: 'Refunds take five working days.' }),
+      'ungrounded',
+    ],
+    [
+      'a stated "I do not know"',
+      result({ grounded: false, answer: 'I do not know based on the provided sources.' }),
+      'abstained',
+    ],
+    [
+      'a cited answer that mentions not knowing something else',
+      result({ answer: 'Refunds take five days [1]. I do not know about fees.' }),
+      'grounded',
+    ],
     [
       'nothing permitted to retrieve',
       result({ sourcesRetrieved: 0, grounded: false }),

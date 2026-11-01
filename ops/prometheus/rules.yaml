@@ -482,7 +482,7 @@ groups:
           slo: "answer-grounding"
         annotations:
           summary: "Answer grounding: the error budget is burning 3x too fast"
-          description: "More than 30.00% of events are bad over both 1d and 2h. At this rate 10.0% of the 30-day budget goes in 1d. An answer that was generated cites the sources it came from."
+          description: "More than 30.00% of events are bad over both 1d and 2h. At this rate 10.0% of the 30-day budget goes in 1d. An answer that was generated cites the sources it came from (a stated \"I do not know\" is not counted either way)."
           runbook: "docs/runbooks/answer-grounding.md"
       - alert: AnswerGroundingDripBurn
         expr: "slo:sli_error:ratio_rate3d{slo=\"answer-grounding\"} > 0.1 and slo:sli_error:ratio_rate6h{slo=\"answer-grounding\"} > 0.1"
@@ -492,7 +492,7 @@ groups:
           slo: "answer-grounding"
         annotations:
           summary: "Answer grounding: the error budget is burning 1x too fast"
-          description: "More than 10.00% of events are bad over both 3d and 6h. At this rate 10.0% of the 30-day budget goes in 3d. An answer that was generated cites the sources it came from."
+          description: "More than 10.00% of events are bad over both 3d and 6h. At this rate 10.0% of the 30-day budget goes in 3d. An answer that was generated cites the sources it came from (a stated \"I do not know\" is not counted either way)."
           runbook: "docs/runbooks/answer-grounding.md"
       - alert: LlmGatewayTelemetryMissing
         expr: "absent_over_time(http_server_requests_total{service=\"llm-gateway\"}[15m])"

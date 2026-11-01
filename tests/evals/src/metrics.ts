@@ -53,12 +53,7 @@ export function forbiddenHits(answer: string, forbidden: readonly string[]): str
   return forbidden.filter((f) => haystack.includes(` ${normalizeForMatch(f)} `));
 }
 
-const ABSTENTION =
-  /could not find|couldnt find|do not know|dont know|cannot provide|cant provide|no information|not able to (?:find|answer)/i;
-
-/** Did the assistant decline to answer (nothing found, not known, or blocked)? */
-export const isAbstention = (answer: string): boolean =>
-  ABSTENTION.test(answer.replace(/['’]/g, ''));
+export { isAbstention } from '../../../apps/assistant/src/ask/abstention';
 
 export interface CitationScore {
   /** Share of the cited documents that were right; absent when nothing was cited. */

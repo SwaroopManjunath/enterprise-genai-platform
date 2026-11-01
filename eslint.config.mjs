@@ -22,9 +22,14 @@ export default tseslint.config(
     languageOptions: { sourceType: 'commonjs', globals: { module: 'writable' } },
   },
   {
-    // Scripts that run under Node outside the TypeScript build (the compose smoke test).
-    files: ['deploy/**/*.mjs'],
+    // Scripts that run under Node outside the TypeScript build (the compose smoke test and the load-test report).
+    files: ['deploy/**/*.mjs', 'tests/load/**/*.mjs'],
     languageOptions: { globals: globals.node },
+  },
+  {
+    // k6 scripts run in k6's own runtime, which provides these.
+    files: ['tests/load/**/*.js'],
+    languageOptions: { globals: { __ENV: 'readonly', open: 'readonly' } },
   },
   {
     rules: {

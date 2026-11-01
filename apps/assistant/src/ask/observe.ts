@@ -1,5 +1,6 @@
 import { annotate, metricsFor } from '@genai/observability';
 import type { AskResult } from './ask.service';
+import { isAbstention } from './abstention';
 import { GuardrailBlockedError } from './errors';
 
 const metrics = metricsFor('assistant');
@@ -9,7 +10,10 @@ export function outcomeOf(result: AskResult): string {
   if (result.cache?.status === 'hit') return 'cache_hit';
   if (result.sourcesRetrieved === 0) return 'no_sources';
   if (result.guardrails.output?.blocked) return 'blocked';
-  return result.grounded ? 'grounded' : 'ungrounded';
+  if (result.grounded) return 'grounded';
+  // A correct "I do not know" is not an answer that failed to cite: counting it as one would make
+  // every question the documents cannot answer spend the grounding budget.
+  return isAbstention(result.answer) ? 'abstained' : 'ungrounded';
 }
 
 /**

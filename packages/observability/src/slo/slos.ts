@@ -130,7 +130,8 @@ export const SLOS: readonly Slo[] = [
     title: 'Answer grounding',
     service: 'assistant',
     objective: 0.9,
-    meaning: 'An answer that was generated cites the sources it came from.',
+    meaning:
+      'An answer that was generated cites the sources it came from (a stated "I do not know" is not counted either way).',
     bad: (w) => rate(promName('answers'), { service: 'assistant', outcome: 'ungrounded' }, w),
     total: (w) =>
       rate(promName('answers'), { service: 'assistant', outcome: '~grounded|ungrounded' }, w),
