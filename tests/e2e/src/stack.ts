@@ -18,7 +18,18 @@ import {
 } from '../../../apps/ingestion/src/config/config';
 import { AppModule as GatewayModule } from '../../../apps/llm-gateway/src/app.module';
 import { LLM_PROVIDERS } from '../../../apps/llm-gateway/src/llm/types';
-import { GullibleProvider } from './gullible-provider';
+import { ScriptedAgentProvider } from './scripted-agent-provider';
+import { AppModule as AgentsModule } from '../../../apps/agents/src/app.module';
+import {
+  AGENTS_CONFIG,
+  loadConfig as loadAgentsConfig,
+} from '../../../apps/agents/src/config/config';
+import {
+  InMemoryMailer,
+  InMemoryTicketSystem,
+  MAILER,
+  TICKET_SYSTEM,
+} from '../../../apps/agents/src/tools/fake-backends';
 import { AppModule as PromptsModule } from '../../../apps/prompt-registry/src/app.module';
 import { AppModule as RetrievalModule } from '../../../apps/retrieval/src/app.module';
 
@@ -29,6 +40,7 @@ export const AUDIENCE = {
   gateway: 'api://gateway',
   prompts: 'api://prompt-registry',
   ingestion: 'api://ingestion',
+  agents: 'api://agents',
 } as const;
 
 export type Service = keyof typeof AUDIENCE;
@@ -55,9 +67,12 @@ export class Stack {
   constructor(
     readonly issuer: TestIssuer,
     readonly urls: Record<Service, string>,
-    readonly llm: GullibleProvider,
+    readonly llm: ScriptedAgentProvider,
     private readonly apps: Record<Service, INestApplication>,
     private readonly oboEndpoint: RunningDevTokenEndpoint,
+    /** What the agent's write tools did, to check that nothing happened without approval. */
+    readonly mailer: InMemoryMailer,
+    readonly tickets: InMemoryTicketSystem,
   ) {}
 
   /** A genuinely signed token for a user, valid for ONE service. */
@@ -103,6 +118,28 @@ export class Stack {
       token: this.token('assistant', caller),
       body: { question, ...extra.body },
       ...(extra.headers && { headers: extra.headers }),
+    });
+  }
+
+  /** Start an agent run as a user. */
+  startRun(caller: Caller, goal: string, extra: { maxSteps?: number } = {}) {
+    return this.call('POST', 'agents', '/v1/runs', {
+      token: this.token('agents', caller),
+      body: { goal, ...extra },
+    });
+  }
+
+  /** Approve or reject the action a run is waiting on. */
+  decide(caller: Caller, runId: string, callId: string, decision: 'approve' | 'reject') {
+    return this.call('POST', 'agents', `/v1/runs/${runId}/approvals`, {
+      token: this.token('agents', caller),
+      body: { callId, decision },
+    });
+  }
+
+  getRun(caller: Caller, runId: string) {
+    return this.call('GET', 'agents', `/v1/runs/${runId}`, {
+      token: this.token('agents', caller),
     });
   }
 
@@ -229,7 +266,7 @@ export interface StackOptions {
 export async function startStack(options: StackOptions = {}): Promise<Stack> {
   const issuer = new TestIssuer();
   // Behaves like the grounded mock unless an attack is present, and records every prompt it sees.
-  const llm = new GullibleProvider();
+  const llm = new ScriptedAgentProvider();
 
   const retrieval = await start(RetrievalModule, AUDIENCE.retrieval, issuer);
   const prompts = await start(PromptsModule, AUDIENCE.prompts, issuer);
@@ -242,6 +279,8 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
     issuer,
     clients: {
       assistant: { secret: 'dev-secret', audience: AUDIENCE.assistant },
+      // The agent acts as the user, exchanging their token for each service it calls.
+      'agents-app': { secret: 'agents-secret', audience: AUDIENCE.agents },
       // The ingestion pipeline's own identity: it holds the `indexer` role and no user.
       'ingestion-app': {
         secret: 'ingestion-secret',
@@ -288,6 +327,29 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
       .useValue(new EnvSecretProvider({ SECRET_INGESTION_CLIENT_SECRET: 'ingestion-secret' })),
   );
 
+  const mailer = new InMemoryMailer();
+  const tickets = new InMemoryTicketSystem();
+  const agents = await start(AgentsModule, AUDIENCE.agents, issuer, (b) =>
+    b
+      .overrideProvider(AGENTS_CONFIG)
+      .useValue(
+        loadAgentsConfig({
+          GATEWAY_URL: gateway.url,
+          RETRIEVAL_URL: retrieval.url,
+          OBO_TOKEN_ENDPOINT: obo.url,
+          OBO_CLIENT_ID: 'agents-app',
+          EMAIL_ALLOWED_DOMAINS: 'acme-bank.example',
+          GUARDRAILS_MODE: options.guardrailsMode ?? 'enforce',
+        }),
+      )
+      .overrideProvider(SECRET_PROVIDER)
+      .useValue(new EnvSecretProvider({ SECRET_AGENTS_CLIENT_SECRET: 'agents-secret' }))
+      .overrideProvider(MAILER)
+      .useValue(mailer)
+      .overrideProvider(TICKET_SYSTEM)
+      .useValue(tickets),
+  );
+
   return new Stack(
     issuer,
     {
@@ -296,6 +358,7 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
       retrieval: retrieval.url,
       gateway: gateway.url,
       prompts: prompts.url,
+      agents: agents.url,
     },
     llm,
     {
@@ -304,8 +367,11 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
       retrieval: retrieval.app,
       gateway: gateway.app,
       prompts: prompts.app,
+      agents: agents.app,
     },
     obo,
+    mailer,
+    tickets,
   );
 }
 

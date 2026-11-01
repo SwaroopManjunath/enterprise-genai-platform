@@ -2,6 +2,7 @@
  * `npm run demo -w @genai/e2e`: starts the real services in one process and walks through the
  * login-to-cited-answer path, so the behaviour can be watched instead of taken on trust.
  */
+import { calls, finalAnswer, type AgentReply } from './scripted-agent-provider';
 import { seedDocuments, startStack, type Caller, type Stack } from './stack';
 
 const bob: Caller = { tenant: 'acme-bank', userId: 'bob', roles: ['analyst'] };
@@ -55,11 +56,105 @@ async function show(
   else console.log('  (no sources the caller may see, so the model was never called)');
 }
 
+const bobAgent: Caller = { ...bob, roles: ['agent-user', 'analyst'] };
+const aliceAgent: Caller = { ...alice, roles: ['agent-user', 'manager'] };
+const dana: Caller = { tenant: 'acme-bank', userId: 'dana', roles: ['agent-user', 'support-lead'] };
+
+interface RunView {
+  id: string;
+  status: string;
+  failure?: string;
+  answer?: string;
+  steps: number;
+  pendingApproval?: { callId: string; tool: string; summary: string };
+  events: { type: string; data: Record<string, unknown> }[];
+}
+
+function printRun(label: string, view: RunView): void {
+  console.log(
+    `  ${label}: ${view.status}${view.failure ? ` (${view.failure})` : ''}, ${view.steps} model step(s)`,
+  );
+  if (view.answer) console.log(`    answer: ${view.answer}`);
+  if (view.pendingApproval) {
+    console.log(
+      `    waiting for approval of ${view.pendingApproval.callId}: ${view.pendingApproval.summary}`,
+    );
+  }
+  const withheld = view.events.filter((e) => e.type === 'tool_result' && e.data.withheld);
+  if (withheld.length) console.log('    a tool result was withheld: it contained instructions');
+}
+
+async function agentDemo(stack: Stack): Promise<void> {
+  console.log('\n--- agents ---');
+  const search = (query: string) => calls({ name: 'search_documents', arguments: { query } });
+
+  console.log('\nBob asks the agent a question. It searches as Bob, then answers:');
+  stack.llm.respondWith([search('refunds'), finalAnswer('Refunds take five working days.')]);
+  printRun('run', (await stack.startRun(bobAgent, 'How long do refunds take?')).body);
+
+  console.log('\nThe agent can only read what its user can read:');
+  for (const [name, who] of [
+    ['Bob', bobAgent],
+    ['Alice', aliceAgent],
+  ] as const) {
+    stack.llm.respondWith([search('salary bands for managers'), finalAnswer('done')]);
+    await stack.startRun(who, 'Find the salary bands.');
+    const saw = stack.llm.agentRequests[1]?.at(-1)?.content ?? '';
+    console.log(
+      `  ${name}'s agent ${/M1/.test(saw) ? 'FOUND the manager-only document' : 'did not see the manager-only document'}`,
+    );
+  }
+
+  console.log(
+    '\nDana (support lead) asks the agent to email a customer. Sending needs her approval:',
+  );
+  const email = { to: 'jo@acme-bank.example', subject: 'Your refund', body: 'It is on its way.' };
+  stack.llm.respondWith([
+    calls({ name: 'send_email', arguments: email }),
+    finalAnswer('The email was sent.'),
+  ]);
+  const paused = (await stack.startRun(dana, 'Tell Jo the refund is on its way.')).body as RunView;
+  printRun('run', paused);
+  console.log(`    emails sent so far: ${stack.mailer.outbox.length}`);
+  const approved = (await stack.decide(dana, paused.id, 'c1', 'approve')).body as RunView;
+  printRun('after Dana approves', approved);
+  console.log(`    emails sent: ${stack.mailer.outbox.length}`);
+  const twice = await stack.decide(dana, paused.id, 'c1', 'approve');
+  console.log(
+    `  approving a second time -> HTTP ${twice.status} ${twice.body.error.code} (still ${stack.mailer.outbox.length} email)`,
+  );
+  const colleague = await stack.decide({ ...dana, userId: 'erin' }, paused.id, 'c1', 'approve');
+  console.log(
+    `  a colleague trying to approve -> HTTP ${colleague.status} ${colleague.body.error.code}`,
+  );
+
+  console.log('\nA model that never stops, with a budget of 4 steps:');
+  let n = 0;
+  stack.llm.respondWith([() => search(`topic ${++n}`)], { repeatLast: true });
+  printRun('run', (await stack.startRun(bobAgent, 'Research everything.', { maxSteps: 4 })).body);
+  console.log(`    model calls made: ${stack.llm.agentRequests.length}`);
+
+  console.log(
+    '\nA model that obeys whatever it reads, searching documents that include a poisoned one:',
+  );
+  const gullible: AgentReply = (messages) => {
+    const last = messages.at(-1)?.content ?? '';
+    if (/PWNED/.test(last)) return finalAnswer('PWNED');
+    if (last.startsWith('<tool_result')) return finalAnswer('Refunds take five working days.');
+    return search('refunds');
+  };
+  stack.llm.respondWith([gullible], { repeatLast: true });
+  printRun('run', (await stack.startRun(bobAgent, 'How long do refunds take?')).body);
+  console.log('\n--- end agents ---');
+}
+
 async function main(): Promise<void> {
   const stack = await startStack();
   try {
     await seedDocuments(stack);
-    console.log('Services started: ingestion, retrieval, prompt registry, gateway, assistant.');
+    console.log(
+      'Services started: ingestion, retrieval, prompt registry, gateway, assistant, agents.',
+    );
     console.log('Uploaded through the ingestion service: an open handbook, a manager-only salary');
     console.log(
       "document, and Globex's handbook (each chunked, then indexed with its access list).",
@@ -133,6 +228,8 @@ async function main(): Promise<void> {
     console.log(
       `  -> HTTP ${wrong.status} ${wrong.body.error.code} (tokens are bound to one service)`,
     );
+
+    await agentDemo(stack);
   } finally {
     await stack.stop();
   }
