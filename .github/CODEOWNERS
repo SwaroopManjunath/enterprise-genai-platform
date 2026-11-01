@@ -8,3 +8,9 @@
 /packages/observability/src/sanitize.ts   @SwaroopManjunath
 /packages/observability/src/slo/          @SwaroopManjunath
 /ops/                                     @SwaroopManjunath
+
+# What ships, and what an image or a cluster is allowed to do.
+/Dockerfile                    @SwaroopManjunath
+/.trivyignore.yaml             @SwaroopManjunath
+/infra/                        @SwaroopManjunath
+/deploy/helm/                  @SwaroopManjunath
