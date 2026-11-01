@@ -2,6 +2,7 @@
  * `npm run demo -w @genai/e2e`: starts the real services in one process and walks through the
  * login-to-cited-answer path, so the behaviour can be watched instead of taken on trust.
  */
+import { initTelemetry } from '@genai/observability';
 import { calls, finalAnswer, type AgentReply } from './scripted-agent-provider';
 import { seedDocuments, startStack, type Caller, type HttpResult, type Stack } from './stack';
 
@@ -362,6 +363,69 @@ async function costDemo(): Promise<void> {
   console.log('\n--- end cost and performance ---');
 }
 
+/** One question, followed through every service it touched, then what was and was not recorded. */
+async function observabilityDemo(): Promise<void> {
+  console.log('\n--- observability: one question, one trace ---');
+  const telemetry = initTelemetry({
+    serviceName: 'demo',
+    traces: 'memory',
+    metrics: 'memory',
+    pseudonymSalt: 'demo-salt',
+  });
+  const stack = await startStack();
+  try {
+    await seedDocuments(stack);
+    const question = 'How long do refunds take?';
+    const res = await stack.ask(bob, question);
+    await new Promise((r) => setTimeout(r, 150));
+
+    const traceId = res.headers.get('x-trace-id') as string;
+    console.log(`\nBob asks: "${question}"`);
+    console.log(`  response header x-trace-id: ${traceId}`);
+    const trace = telemetry.memory!.spans().filter((s) => s.spanContext().traceId === traceId);
+    const children = (id?: string) =>
+      trace
+        .filter((s) => s.parentSpanContext?.spanId === id)
+        .sort((a, b) => a.startTime[0] - b.startTime[0] || a.startTime[1] - b.startTime[1]);
+    const ids = new Set(trace.map((s) => s.spanContext().spanId));
+    const roots = trace.filter((s) => !s.parentSpanContext || !ids.has(s.parentSpanContext.spanId));
+    const walk = (span: (typeof trace)[number], depth: number): void => {
+      const ms =
+        (span.endTime[0] - span.startTime[0]) * 1e3 + (span.endTime[1] - span.startTime[1]) / 1e6;
+      console.log(
+        `  ${'  '.repeat(depth)}${span.name.padEnd(36 - depth * 2)} ${ms.toFixed(1).padStart(7)} ms  [${span.instrumentationScope.name}]`,
+      );
+      for (const child of children(span.spanContext().spanId)) walk(child, depth + 1);
+    };
+    for (const root of roots) walk(root, 0);
+
+    const request = trace.find((s) => s.name === 'POST /v1/ask');
+    console.log(`\n  what the request span records: ${JSON.stringify(request?.attributes)}`);
+
+    const metrics = await telemetry.memory!.metrics();
+    console.log('\n  some of the metrics (counts and labels only):');
+    for (const name of ['genai.assistant.answers', 'genai.llm.tokens', 'genai.llm.cost']) {
+      for (const p of metrics.filter((m) => m.name === name)) {
+        console.log(`    ${name} ${JSON.stringify(p.attributes)} = ${p.value}`);
+      }
+    }
+
+    const everything = JSON.stringify([
+      telemetry.memory!.spans().map((s) => [s.name, s.attributes, s.events]),
+      metrics,
+    ]);
+    const leaked = ['refunds', 'five working days', 'acme-bank', 'bob'].filter((t) =>
+      everything.includes(t),
+    );
+    console.log(
+      `\n  scanned ${telemetry.memory!.spans().length} spans and ${metrics.length} data points for the question, the answer, the tenant and the user: ${leaked.length === 0 ? 'none found' : `FOUND ${leaked.join(', ')}`}`,
+    );
+  } finally {
+    await stack.stop();
+    await telemetry.shutdown();
+  }
+}
+
 async function main(): Promise<void> {
   const stack = await startStack();
   try {
@@ -446,6 +510,7 @@ async function main(): Promise<void> {
     await agentDemo(stack);
     await mcpDemo(stack);
     await costDemo();
+    await observabilityDemo();
   } finally {
     await stack.stop();
   }

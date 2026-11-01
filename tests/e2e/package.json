@@ -20,6 +20,7 @@
     "zod": "^3.24.0"
   },
   "devDependencies": {
+    "@genai/observability": "0.1.0",
     "@genai/shared": "0.1.0",
     "ts-node": "^10.9.2"
   }
