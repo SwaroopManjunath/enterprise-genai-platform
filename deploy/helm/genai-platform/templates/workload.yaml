@@ -1,0 +1,61 @@
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.enabled }}
+{{- $ctx := dict "root" $ "name" $name "svc" $svc }}
+---
+{{- if and $.Values.rollouts.enabled $svc.canary }}
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "genai.labels" $ctx | nindent 4 }}
+spec:
+  # replicas is left to the HorizontalPodAutoscaler (scaling.yaml); setting it here would fight it.
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "genai.selectorLabels" $ctx | nindent 6 }}
+  strategy:
+    canary:
+      # The canary is judged on its own pods' metrics while it takes traffic, and rolled back
+      # without a person if it breaches the SLO thresholds (see analysis.yaml).
+      canaryService: {{ $name }}-canary
+      stableService: {{ $name }}
+      maxSurge: 1
+      maxUnavailable: 0
+      analysis:
+        templates:
+          - templateName: canary-has-traffic
+          - templateName: canary-error-ratio
+          - templateName: canary-slow-ratio
+        startingStep: 0
+        args:
+          - name: service
+            value: {{ $name }}
+          - name: pod-hash
+            valueFrom:
+              podTemplateHashValue: Latest
+      steps:
+        {{- toYaml $.Values.rollouts.steps | nindent 8 }}
+  template:
+    {{- include "genai.podTemplate" $ctx | nindent 4 }}
+{{- else }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "genai.labels" $ctx | nindent 4 }}
+spec:
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "genai.selectorLabels" $ctx | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  template:
+    {{- include "genai.podTemplate" $ctx | nindent 4 }}
+{{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,59 @@
+{{- if .Values.rollouts.enabled }}
+{{- $a := .Values.rollouts.analysis }}
+{{- /* Per-pod selector for the canary's own pods; Argo names them <rollout>-<template hash>-<suffix>. */}}
+{{- $pods := `pod=~"{{args.service}}-{{args.pod-hash}}-.*"` }}
+{{- $sel := printf `service="{{args.service}}",route!="/health",%s` $pods }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: canary-has-traffic
+  labels:
+    app.kubernetes.io/part-of: genai-platform
+spec:
+  args: [{ name: service }, { name: pod-hash }]
+  metrics:
+    - name: requests-seen
+      interval: {{ $a.interval }}
+      count: {{ $a.count }}
+      # A canary that has received nothing has proved nothing.
+      successCondition: result[0] >= {{ $a.minRequests }}
+      failureLimit: {{ $a.count }}
+      provider:
+        {{- include "genai.analysisProvider" (dict "root" $ "query" (printf `sum(increase(http_server_requests_total{%s}[%s]))` $sel $a.window)) | nindent 8 }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: canary-error-ratio
+  labels:
+    app.kubernetes.io/part-of: genai-platform
+spec:
+  args: [{ name: service }, { name: pod-hash }]
+  metrics:
+    - name: server-error-ratio
+      interval: {{ $a.interval }}
+      count: {{ $a.count }}
+      # NaN means no traffic yet: the template above decides whether that is acceptable.
+      successCondition: isNaN(result[0]) || result[0] <= {{ $a.maxErrorRatio }}
+      failureLimit: 0
+      provider:
+        {{- include "genai.analysisProvider" (dict "root" $ "query" (printf `sum(rate(http_server_requests_total{%s,status_class="5xx"}[%s])) / sum(rate(http_server_requests_total{%s}[%s]))` $sel $a.window $sel $a.window)) | nindent 8 }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: canary-slow-ratio
+  labels:
+    app.kubernetes.io/part-of: genai-platform
+spec:
+  args: [{ name: service }, { name: pod-hash }]
+  metrics:
+    - name: slower-than-5s
+      interval: {{ $a.interval }}
+      count: {{ $a.count }}
+      successCondition: isNaN(result[0]) || result[0] <= {{ $a.maxSlowRatio }}
+      failureLimit: 0
+      provider:
+        {{- include "genai.analysisProvider" (dict "root" $ "query" (printf `(sum(rate(http_server_duration_count{%s}[%s])) - sum(rate(http_server_duration_bucket{%s,le="5000"}[%s]))) / sum(rate(http_server_duration_count{%s}[%s]))` $sel $a.window $sel $a.window $sel $a.window)) | nindent 8 }}
+{{- end }}

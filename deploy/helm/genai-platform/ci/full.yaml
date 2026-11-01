@@ -1,0 +1,46 @@
+# Every feature on, with placeholder values: what the chart's own checks render and validate.
+image: { registry: registry.example.com, tag: 1.2.3 }
+environment: staging
+auth:
+  issuer: https://login.microsoftonline.com/11111111-1111-1111-1111-111111111111/v2.0
+  jwksUrl: https://login.microsoftonline.com/11111111-1111-1111-1111-111111111111/discovery/v2.0/keys
+  tokenEndpoint: https://login.microsoftonline.com/11111111-1111-1111-1111-111111111111/oauth2/v2.0/token
+azure:
+  keyVaultName: kv-genai-staging
+  tenantId: 11111111-1111-1111-1111-111111111111
+telemetry:
+  otlpEndpoint: http://otel-collector.monitoring:4318
+llmGateway:
+  deployments:
+    - {
+        name: aoai-primary,
+        endpoint: 'https://oai-primary.openai.azure.com',
+        deployment: chat,
+        apiKeySecret: aoai-primary-key,
+      }
+    - {
+        name: aoai-secondary,
+        endpoint: 'https://oai-secondary.openai.azure.com',
+        deployment: chat,
+        apiKeySecret: aoai-secondary-key,
+      }
+  prices:
+    aoai-primary: { inputPerMTok: 2.5, outputPerMTok: 10 }
+ingress: { enabled: true, domain: genai.example.com, clusterIssuer: letsencrypt }
+monitoring:
+  serviceMonitor: { enabled: true, labels: { release: kube-prometheus-stack } }
+  prometheusRule: { enabled: true, labels: { release: kube-prometheus-stack } }
+rollouts: { enabled: true }
+serviceIdentities:
+  llm-gateway: 22222222-2222-2222-2222-000000000001
+  prompt-registry: 22222222-2222-2222-2222-000000000002
+  retrieval: 22222222-2222-2222-2222-000000000003
+  ingestion: 22222222-2222-2222-2222-000000000004
+  assistant: 22222222-2222-2222-2222-000000000005
+  agents: 22222222-2222-2222-2222-000000000006
+  mcp-gateway: 22222222-2222-2222-2222-000000000007
+services:
+  ingestion: { clientId: 33333333-3333-3333-3333-000000000004 }
+  assistant: { clientId: 33333333-3333-3333-3333-000000000005 }
+  agents: { clientId: 33333333-3333-3333-3333-000000000006 }
+  mcp-gateway: { clientId: 33333333-3333-3333-3333-000000000007 }

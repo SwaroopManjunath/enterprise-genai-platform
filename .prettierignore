@@ -3,3 +3,5 @@ dist
 coverage
 package-lock.json
 ops/
+deploy/helm/genai-platform/templates/
+deploy/helm/genai-platform/files/

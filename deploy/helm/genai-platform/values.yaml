@@ -1,0 +1,150 @@
+# One release per namespace: services find each other by plain name (http://retrieval:3000), and the
+# service accounts are named after the services so the Terraform federated credentials match.
+
+image:
+  registry: '' # for example acrgenaistaging.azurecr.io (required)
+  repositoryPrefix: genai
+  tag: '' # a version or a digest tag from CI (required: there is no "latest")
+  pullPolicy: IfNotPresent
+
+environment: staging
+
+auth:
+  issuer: '' # the Entra ID issuer, https://login.microsoftonline.com/<tenant>/v2.0 (required)
+  jwksUrl: '' # its signing keys, .../discovery/v2.0/keys (required)
+  tokenEndpoint: '' # the on-behalf-of endpoint, .../oauth2/v2.0/token (required)
+  tenantClaim: tid
+
+azure:
+  keyVaultName: '' # the vault the secrets live in (required)
+  tenantId: '' # directory the vault belongs to (required)
+
+# The client id of each service's Azure identity: Terraform's `service_identity_client_ids` output.
+# The chart annotates the service account with it and uses it to read the vault.
+serviceIdentities: {}
+#  assistant: 00000000-0000-0000-0000-000000000000
+
+telemetry:
+  # An OTLP/HTTP collector for traces. Empty means traces are not exported. Metrics are always
+  # exposed on the metrics port for Prometheus to scrape.
+  otlpEndpoint: ''
+  metricsPort: 9464
+
+llmGateway:
+  provider: azure
+  # Ordered by preference: the first is primary, the rest are fallbacks. Each apiKeySecret names a
+  # Key Vault secret; the chart mounts exactly those and nothing else.
+  deployments: []
+  # - name: aoai-primary
+  #   endpoint: https://oai-genai-staging-primary.openai.azure.com
+  #   deployment: chat
+  #   apiKeySecret: aoai-primary-key
+  prices: {}
+
+ingress:
+  enabled: false
+  className: nginx
+  domain: '' # services get <service>.<domain>
+  clusterIssuer: '' # a cert-manager ClusterIssuer; empty means no certificate is requested
+
+networkPolicy:
+  enabled: true
+  ingressControllerNamespace: ingress-nginx
+  monitoringNamespace: monitoring
+
+monitoring:
+  serviceMonitor:
+    enabled: false # needs the Prometheus Operator CRDs
+    interval: 15s
+    labels: {}
+  prometheusRule:
+    enabled: false # the generated SLO alerts (files/rules.yaml)
+    labels: {}
+
+rollouts:
+  # Canary releases with Argo Rollouts (needs its CRDs): a service with `canary: true` becomes a
+  # Rollout that is promoted only while the canary's own error rate and latency stay inside the SLOs.
+  enabled: false
+  prometheusAddress: http://prometheus-operated.monitoring:9090
+  analysis:
+    window: 2m
+    interval: 1m
+    count: 5
+    # 6x the 0.5% budget of a 99.5% objective: the "slow burn" page threshold, applied to the canary alone.
+    maxErrorRatio: 0.03
+    # Requests slower than 5 seconds, as a share. 3x the 5% budget of the latency objective.
+    maxSlowRatio: 0.15
+    # A canary that has received nothing has proved nothing.
+    minRequests: 20
+  steps:
+    - setWeight: 25
+    - pause: { duration: 3m }
+    - setWeight: 50
+    - pause: { duration: 3m }
+
+defaults:
+  replicas: { min: 2, max: 6 }
+  targetCPUUtilization: 70
+  resources:
+    requests: { cpu: 100m, memory: 192Mi }
+    limits: { memory: 384Mi } # no CPU limit on purpose: throttling shows up as latency
+  port: 3000
+
+# Which services run, who may call whom, and what each reads from the vault. A service's
+# NetworkPolicy is derived from `calls`: it may reach exactly those and be reached by their callers.
+services:
+  llm-gateway:
+    enabled: true
+    audience: api://gateway
+    canary: true
+    calls: []
+    secrets:
+      - { name: telemetry-pseudonym-salt, env: TELEMETRY_PSEUDONYM_SALT }
+  prompt-registry:
+    enabled: true
+    audience: api://prompt-registry
+    calls: []
+  retrieval:
+    enabled: true
+    audience: api://retrieval
+    calls: []
+  ingestion:
+    enabled: true
+    audience: api://ingestion
+    public: true
+    clientId: '' # the Entra app registration this service signs in as (required)
+    calls: [retrieval]
+    secrets:
+      - { name: ingestion-client-secret }
+  assistant:
+    enabled: true
+    audience: api://assistant
+    public: true
+    canary: true
+    clientId: ''
+    calls: [retrieval, prompt-registry, llm-gateway]
+    secrets:
+      - { name: assistant-client-secret }
+    ingressAnnotations:
+      # Answers stream as server-sent events: the proxy must not hold them back.
+      nginx.ingress.kubernetes.io/proxy-buffering: 'off'
+      nginx.ingress.kubernetes.io/proxy-read-timeout: '300'
+  agents:
+    enabled: true
+    audience: api://agents
+    public: true
+    clientId: ''
+    calls: [llm-gateway, retrieval, mcp-gateway]
+    secrets:
+      - { name: agents-client-secret }
+  mcp-gateway:
+    enabled: true
+    audience: api://mcp-gateway
+    public: true
+    clientId: ''
+    calls: []
+    # Third-party tool servers are reached over the internet; the gateway's own egress rules
+    # (private addresses refused at connect time) decide which.
+    egressPorts: [443, 80]
+    secrets:
+      - { name: mcp-gateway-client-secret }
