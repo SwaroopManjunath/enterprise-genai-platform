@@ -50,6 +50,11 @@ export function setAttributes(span: Span, attributes: Record<string, unknown>): 
   span.setAttributes(safeAttributes(attributes));
 }
 
+/** Adds attributes to the span the current code is running in (the request's, in a service). */
+export function annotate(attributes: Record<string, unknown>): void {
+  trace.getActiveSpan()?.setAttributes(safeAttributes(attributes));
+}
+
 /** The trace and span the current code is running in, for correlating logs. */
 export function currentTrace(): { traceId: string; spanId: string } | undefined {
   const span = trace.getSpan(context.active());

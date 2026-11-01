@@ -1,5 +1,6 @@
 import type { AuthenticatedPrincipal, OboTokenClient } from '@genai/auth';
 import type { Guardrails } from '@genai/guardrails';
+import { annotate, metricsFor } from '@genai/observability';
 import { Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { AgentLimits } from '../config/config';
@@ -38,6 +39,8 @@ const FORMAT_REMINDER =
   'Reply with exactly one JSON object: {"calls":[{"name":...,"arguments":{...}}]} or {"final":"..."}.';
 
 type Outcome = { ok: true; value: unknown } | { ok: false; error: string };
+
+const metrics = metricsFor('agents');
 
 /**
  * Runs the plan-act loop with every limit enforced by this code, not by the model's cooperation:
@@ -230,6 +233,7 @@ export class AgentRunner {
       if (verdict.blocked) return this.fail(run, 'answer_blocked');
 
       run.status = 'completed';
+      metrics.count('agentRuns', { status: 'completed' });
       run.answer = verdict.text;
       this.record(run, 'run_completed', 'agent', { chars: verdict.text.length });
       return this.save(run);
@@ -328,6 +332,7 @@ export class AgentRunner {
     if (tool.risk === 'write') {
       // Never executed from here: a person decides, and the stored call is what runs.
       run.status = 'awaiting_approval';
+      metrics.count('agentRuns', { status: 'awaiting_approval' });
       run.pending = {
         call: validated,
         summary: tool.describe(args as never),
@@ -352,6 +357,7 @@ export class AgentRunner {
     message: string,
     tool?: AnyTool,
   ): Promise<Run> {
+    metrics.count('agentToolCalls', { tool: tool?.name ?? 'unknown', outcome: 'denied' });
     this.record(run, 'tool_denied', 'agent', {
       callId: call.id,
       tool: truncate(call.name, 64),
@@ -410,6 +416,10 @@ export class AgentRunner {
     }
 
     const prepared = this.prepareOutput(outcome, guardrails, limits.maxToolOutputChars);
+    metrics.count('agentToolCalls', {
+      tool: tool.name,
+      outcome: !outcome.ok ? 'error' : prepared.withheld ? 'withheld' : 'ok',
+    });
     this.record(run, 'tool_result', 'agent', {
       callId: call.id,
       tool: tool.name,
@@ -474,6 +484,8 @@ export class AgentRunner {
   private async fail(run: Run, reason: FailureReason): Promise<Run> {
     run.status = 'failed';
     run.failure = reason;
+    metrics.count('agentRuns', { status: 'failed', failure: reason });
+    annotate({ 'genai.agent.failure': reason });
     run.queue = [];
     run.pending = undefined;
     this.record(run, 'run_failed', 'agent', { reason });
