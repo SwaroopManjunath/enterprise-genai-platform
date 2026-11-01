@@ -12,7 +12,7 @@ deployment.
 > `npm run demo -w @genai/e2e`), with **guardrails** against prompt injection, PII leaks and prompt
 > leaks (pattern-based, with documented limits), and an **agent** that uses tools as the user with
 > hard limits and a person's approval before any write, whose third-party tools come through an
-> **MCP gateway** (approved definitions, per-role access, an audit log), plus per-tenant **cost tracking**, a scoped **answer cache** (it can never hand one person another person's answer) and **guarded streaming**. It all runs on **local stand-ins**: an in-memory queue, index and
+> **MCP gateway** (approved definitions, per-role access, an audit log), plus per-tenant **cost tracking**, a scoped **answer cache** (it can never hand one person another person's answer) and **guarded streaming**, and an **evaluation gate** that fails the build when answers get worse (every metric has a floor, a ratchet against a committed baseline, and a replay of known regressions that must each be caught). It all runs on **local stand-ins**: an in-memory queue, index and
 > stores, a deterministic **mock model** (not an LLM), and locally generated signing keys instead of
 > Entra ID. Nothing has been run against real Azure yet.
 > The diagram below is the **target**, colour-coded by what exists today.
@@ -21,22 +21,22 @@ deployment.
 
 ✅ Done · 🚧 In progress · 📋 Planned
 
-| Area                 | Status     | What exists today                                                                                                                                                  | Still stubbed or missing                                                                       |
-| -------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| Monorepo, CI, ADRs   | ✅ Done    | npm workspaces, strict TS, lint/format, commit hooks, GitHub Actions                                                                                               | -                                                                                              |
-| LLM gateway          | ✅ Done    | Rate limits, token quotas, retries, fallback, error mapping                                                                                                        | Azure client untested against real Azure; no cache                                             |
-| Prompt registry      | ✅ Done    | Versions, audited rollback, sticky A/B, safe templates                                                                                                             | In-memory storage (no Cosmos DB yet)                                                           |
-| Ingestion pipeline   | ✅ Done    | Queue with DLQ, chunking per file type, idempotent; **writes to search with access lists** as its own service identity                                             | In-memory queue; no PDF/Office, no delete; 200 KB limit                                        |
-| Retrieval service    | ✅ Done    | BM25 + vector, rank fusion, rerank, role/tenant trimming                                                                                                           | Hash embedder (spelling, not meaning); in-memory                                               |
-| Auth (Entra ID)      | ✅ Done    | JWT validation, secure-by-default guard, role gates, OBO client                                                                                                    | Not run against real Entra ID; OBO and Key Vault not wired yet                                 |
-| **Vertical slice**   | ✅ Done    | Upload, ingest, index, then ask: `assistant` acts as the user, verifies citations; e2e over real HTTP                                                              | Mock model (deterministic test double); nothing on real Azure                                  |
-| Guardrails           | ✅ Done    | PII/secret redaction, injection detection, canary and output checks; enforce or monitor mode                                                                       | Pattern-based: misses paraphrase, other languages, split attacks; assistant only               |
-| Agent orchestrator   | ✅ Done    | Tool calls as the user, step/time/loop limits, owner approval before any write, audit trail; poisoned tool output screened                                         | In-memory runs and stand-in tools; runs inside the request; owner-only approval                |
-| MCP gateway          | ✅ Done    | Default-deny registry, pinned tool definitions (a changed tool switches off), SSRF-safe egress, per-role access, audit log; the agent uses it                      | In-memory registry and audit log; Streamable HTTP and tools only; per-process rate limit       |
-| Cost and performance | ✅ Done    | Priced calls and per-tenant spend with a daily budget; answer cache scoped to what the model was given (off/shadow/serve); streaming with the output checks intact | In-memory cache and spend; wording similarity, not a real embedding model; synthetic benchmark |
-| Evaluation pipeline  | 📋 Planned | -                                                                                                                                                                  | Groundedness/relevance gates that block deploys                                                |
-| Observability        | 📋 Planned | -                                                                                                                                                                  | OpenTelemetry traces, SLO dashboards, alerts                                                   |
-| Delivery             | 📋 Planned | -                                                                                                                                                                  | Docker, Helm, AKS, canary rollout, Bicep/Terraform                                             |
+| Area                 | Status     | What exists today                                                                                                                                                                          | Still stubbed or missing                                                                       |
+| -------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| Monorepo, CI, ADRs   | ✅ Done    | npm workspaces, strict TS, lint/format, commit hooks, GitHub Actions                                                                                                                       | -                                                                                              |
+| LLM gateway          | ✅ Done    | Rate limits, token quotas, retries, fallback, error mapping                                                                                                                                | Azure client untested against real Azure; no cache                                             |
+| Prompt registry      | ✅ Done    | Versions, audited rollback, sticky A/B, safe templates                                                                                                                                     | In-memory storage (no Cosmos DB yet)                                                           |
+| Ingestion pipeline   | ✅ Done    | Queue with DLQ, chunking per file type, idempotent; **writes to search with access lists** as its own service identity                                                                     | In-memory queue; no PDF/Office, no delete; 200 KB limit                                        |
+| Retrieval service    | ✅ Done    | BM25 + vector, rank fusion, rerank, role/tenant trimming                                                                                                                                   | Hash embedder (spelling, not meaning); in-memory                                               |
+| Auth (Entra ID)      | ✅ Done    | JWT validation, secure-by-default guard, role gates, OBO client                                                                                                                            | Not run against real Entra ID; OBO and Key Vault not wired yet                                 |
+| **Vertical slice**   | ✅ Done    | Upload, ingest, index, then ask: `assistant` acts as the user, verifies citations; e2e over real HTTP                                                                                      | Mock model (deterministic test double); nothing on real Azure                                  |
+| Guardrails           | ✅ Done    | PII/secret redaction, injection detection, canary and output checks; enforce or monitor mode                                                                                               | Pattern-based: misses paraphrase, other languages, split attacks; assistant only               |
+| Agent orchestrator   | ✅ Done    | Tool calls as the user, step/time/loop limits, owner approval before any write, audit trail; poisoned tool output screened                                                                 | In-memory runs and stand-in tools; runs inside the request; owner-only approval                |
+| MCP gateway          | ✅ Done    | Default-deny registry, pinned tool definitions (a changed tool switches off), SSRF-safe egress, per-role access, audit log; the agent uses it                                              | In-memory registry and audit log; Streamable HTTP and tools only; per-process rate limit       |
+| Cost and performance | ✅ Done    | Priced calls and per-tenant spend with a daily budget; answer cache scoped to what the model was given (off/shadow/serve); streaming with the output checks intact                         | In-memory cache and spend; wording similarity, not a real embedding model; synthetic benchmark |
+| Evaluation pipeline  | ✅ Done    | 41 labelled cases through the real services; retrieval, groundedness (independent judge), citations, abstention, leaks; floors, a baseline ratchet, and 8 replayed regressions; runs in CI | Scores calibrated to the stand-in model; small dataset; lexical judge                          |
+| Observability        | 📋 Planned | -                                                                                                                                                                                          | OpenTelemetry traces, SLO dashboards, alerts                                                   |
+| Delivery             | 📋 Planned | -                                                                                                                                                                                          | Docker, Helm, AKS, canary rollout, Bicep/Terraform                                             |
 
 ## Architecture (target)
 
@@ -79,15 +79,16 @@ Everything below was produced by running the code in this repository.
 | `@genai/agents`                      | 121      |
 | `@genai/mcp-gateway`                 | 139      |
 | `@genai/assistant`                   | 164      |
-| `@genai/llm-gateway`                 | 99       |
+| `@genai/llm-gateway`                 | 101      |
 | `@genai/prompt-registry`             | 59       |
 | `@genai/ingestion`                   | 84       |
 | `@genai/retrieval`                   | 71       |
 | `@genai/auth`                        | 70       |
 | `@genai/guardrails`                  | 90       |
 | `@genai/shared`                      | 31       |
-| `@genai/e2e` (all services together) | 85       |
-| **Total**                            | **1013** |
+| `@genai/e2e` (all services together) | 86       |
+| `@genai/evals` (the quality gate)    | 92       |
+| **Total**                            | **1108** |
 
 Format check, lint, typecheck and build also pass in CI. Many are end-to-end HTTP tests (failure
 injection, tenant isolation, access trimming, forged and expired tokens, spoofed headers). The 85
@@ -115,6 +116,20 @@ benchmark caught a mistake of mine: the gateway's per-minute rate limit was sile
 and flattering the "cache off" numbers, so the script now fails on any refused request. The new
 timings in responses also exposed an old latent flake (tests that searched a whole response for digits
 could match inside a random request id), now removed.
+
+The evaluation gate (`npm run eval`) is checked three ways. Its own code was broken on purpose eleven
+ways (the judge ignoring numbers, units or negation; judging an answer against itself; the gate
+ignoring the baseline, passing a missing number or tolerating anything; skipping the forbidden-text
+or leak checks; gating the informational categories; accepting an unsound dataset) and each fails
+its tests. Eight degraded versions of the system (a model that invents, cites wrongly or ignores its
+sources; two documents lost by ingestion; a prompt without its sources or padded with boilerplate;
+guardrails left in shadow mode; one answer slipping, which only the ratchet notices) are replayed in CI
+and each must be caught by the right metric. And its first run scored 34 of 38 gated cases, which found
+the stand-in answering from a source that shared one word with the question (fixed), a wrong label of
+mine (fixed) and a genuine gap (a one-signal prompt injection reaches a naive model), now recorded as a
+known gap instead of hidden. The benchmark and demo above were run again after that change; under heavy
+machine load a few runs hit timeouts, which the benchmark's refuse-to-continue guard turned into
+errors instead of flattering numbers.
 
 **A real run** (`npm run -s demo -w @genai/e2e`): documents are uploaded through the ingestion
 service, then the same question is asked by callers with different roles. Abridged:
@@ -249,11 +264,11 @@ The answer cache (serving):
 It cannot hand one person another person's answer (same question, different documents):
   Alice (manager)  -> cache miss, model called; answer uses the manager-only document
   Bob (analyst)    -> cache miss, model called; answer does not use the manager-only document
-  Bob again        -> cache HIT (exact, saved 292 tokens / $0.000850); answer does not use the manager-only document
-  Alice again      -> cache HIT (exact, saved 321 tokens / $0.000945); answer uses the manager-only document
+  Bob again        -> cache HIT (exact, saved 258 tokens / $0.000705); answer does not use the manager-only document
+  Alice again      -> cache HIT (exact, saved 318 tokens / $0.000923); answer uses the manager-only document
 
 Streaming: the reader sees text while the answer is still being written.
-  meta at 21 ms, first text at 264 ms, complete at 552 ms
+  meta at 22 ms, first text at 267 ms, complete at 557 ms
   24 pieces, 246 characters; the final event matches what was streamed
 
 Streaming does not skip the output checks:
@@ -261,8 +276,8 @@ Streaming does not skip the output checks:
   a card number in a document: never sent, answer "The settlement card for refunds is [REDACTED:CARD] and it is..."
 
 What the tenant spent, and what the cache saved (cost-viewer role):
-  gateway: 8 model calls (3 streamed, 1 estimated), 2498 tokens, $0.007813
-  cache:   4 hits / 8 misses (hit rate 33%), saved 1155 tokens / $0.003391
+  gateway: 8 model calls (3 streamed, 1 estimated), 2461 tokens, $0.007556
+  cache:   4 hits / 8 misses (hit rate 33%), saved 1118 tokens / $0.003224
 ```
 
 **A measured run** (`npm run -s bench -w @genai/e2e`): one workload of 120 requests (70% repeat
@@ -275,17 +290,51 @@ Workload: 120 requests, 49 distinct wordings (70% repeat questions in assorted w
 Model: deterministic stand-in at illustrative prices ($2.50 in / $10 out per million tokens).
 
 mode    requests  model calls   tokens      cost  hits    median       p95
-off          120         120    26060   $0.0796     0     74 ms     84 ms
-shadow       120         120    26060   $0.0796     0     74 ms     83 ms
-serve        120          42     9509   $0.0288    78      6 ms     73 ms
+off          120         120    25875   $0.0777     0     62 ms     76 ms
+shadow       120         120    25875   $0.0777     0     61 ms     77 ms
+serve        120          42     9324   $0.0270    78      5 ms     50 ms
         (median / p95: how soon the reader sees the first text of the answer)
 
-Serving the cache: 65% fewer model calls, 64% fewer tokens, 64% less spend.
-Median wait for the first text: 74 ms without the cache, 6 ms with it.
+Serving the cache: 65% fewer model calls, 64% fewer tokens, 65% less spend.
+Median wait for the first text: 62 ms without the cache, 5 ms with it.
 Shadow mode (nothing served): 100% of the answers it would have served matched a fresh one.
 
 Wrong hits: 0 of 8 pairs that differ by one word and mean something else.
 Rewordings served from the cache: 8 of 9.
+```
+
+**The quality gate** (`npm run eval`, run by CI on every pull request): 41 labelled questions through
+the real services, scored on retrieval, groundedness, citations, abstention, leaks and cost. One
+answer slipping, with every threshold still holding, is caught by the ratchet against the baseline:
+
+```text
+Evaluation of variant "slips-once" on 38 gated cases (37 fully correct)
+
+  pass  caseAccuracy is 0.974, must be at least 0.950
+  pass  groundedness is 0.981, must be at least 0.950
+  ...
+  FAIL  regression: caseAccuracy is 0.974, baseline 1 (worse by 0.026, allowed 0.020)
+
+  1 case(s) went wrong:
+    record-retention: unsupported claim "Backups are kept for ever." (only 33% of its words appear in the sources)
+
+GATE: FAILED
+```
+
+and `npm run eval:selftest` replays the regressions the gate must catch:
+
+```text
+  ok   good                 passes
+  ok   hallucinating        caught by caseAccuracy, groundedness
+  ok   wrong-citations      caught by caseAccuracy, groundedness, citationPrecision, citationRecall
+  ok   ignores-sources      caught by caseAccuracy, factRecall, groundedness, citationPrecision, citationRecall
+  ok   slips-once           caught by caseAccuracy
+  ok   lost-documents       caught by caseAccuracy, retrievalRecallAtK, retrievalMRR, answerRate, factRecall
+  ok   bad-prompt           caught by caseAccuracy, answerRate, factRecall, groundedness, ...
+  ok   verbose-prompt       caught by avgTokens
+  ok   guardrails-monitor   caught by caseAccuracy, abstentionAccuracy, blockAccuracy, forbiddenRate, ...
+
+SELF-TEST PASSED: the gate catches every regression it was shown.
 ```
 
 The model here is a deterministic stand-in, so what this proves is the **path and the access
@@ -311,7 +360,8 @@ reveal what the asking user may already read.
 | `packages/guardrails`  | `@genai/guardrails`: PII redaction, injection detection, output checks ([docs](packages/guardrails/README.md)) |
 | `packages/auth`        | `@genai/auth`: JWT validation, guard, on-behalf-of, secrets ([docs](packages/auth/README.md))                  |
 | `packages/shared`      | `@genai/shared`: tenant context and cross-service helpers                                                      |
-| `tests/e2e`            | The real services together over HTTP, plus the runnable demo                                                   |
+| `tests/e2e`            | The real services together over HTTP, plus the runnable demo and benchmark                                     |
+| `tests/evals`          | The quality gate: labelled cases, judge, thresholds and baseline ([docs](tests/evals/README.md))               |
 | `docs/adr`             | Architecture decision records: why X over Y                                                                    |
 | `.github/`             | CI workflow and PR template                                                                                    |
 
@@ -375,7 +425,10 @@ building the remaining pieces, so there is always a demonstrable system.
       answer cache scoped by tenant and by exactly what the model was given (so access control
       cannot be bypassed; shadow mode measures it first), streaming through a guard that keeps the
       output checks intact, interrupted streams billed as estimates (ADR 0013)
-- [ ] **Step 12: Evaluation pipeline.** Groundedness/relevance gates that block deploys
+- [x] **Step 12: Evaluation pipeline.** A labelled dataset run through the real services and
+      scored on retrieval, groundedness (an independent judge that is itself graded), citations,
+      abstention, leaks and cost; floors, a baseline ratchet and a sample-size check; eight
+      regressions replayed in CI to prove the gate can fail (ADR 0014)
 - [ ] **Step 13: Observability.** OpenTelemetry traces, SLO dashboards and alerts
 - [ ] **Step 14: Delivery.** Docker, Helm, AKS, canary rollout, Bicep/Terraform
 - [ ] **Step 15: Proof.** Load-test results, cost-savings numbers, eval scores
