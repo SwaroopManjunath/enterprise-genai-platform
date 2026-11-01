@@ -1,8 +1,12 @@
 import { ProviderError } from './provider-error';
-import type { ChatRequest, ChatResult, LlmProvider } from './types';
+import { streamFromResult } from './streaming';
+import { estimateTokens } from './tokens';
+import type { ChatRequest, ChatResult, LlmProvider, StreamEvent } from './types';
 
 export interface MockProviderOptions {
   name?: string;
+  /** Pause between streamed pieces, to make time-to-first-token measurable in tests and demos. */
+  streamDelayMs?: number;
   /** Called per request; throw a ProviderError to simulate an upstream failure. */
   behavior?: (request: ChatRequest, callNumber: number) => void | Promise<void>;
 }
@@ -14,6 +18,13 @@ export class MockProvider implements LlmProvider {
 
   constructor(private readonly options: MockProviderOptions = {}) {
     this.name = options.name ?? 'mock';
+  }
+
+  async *chatStream(
+    request: ChatRequest,
+    signal?: AbortSignal,
+  ): AsyncGenerator<StreamEvent, void, void> {
+    yield* streamFromResult(await this.chat(request), this.options.streamDelayMs ?? 0, signal);
   }
 
   async chat(request: ChatRequest): Promise<ChatResult> {
@@ -34,10 +45,7 @@ export class MockProvider implements LlmProvider {
   }
 }
 
-/** Rough heuristic (~4 chars per token); real counts come from the upstream usage field. */
-export function estimateTokens(text: string): number {
-  return Math.max(1, Math.ceil(text.length / 4));
-}
+export { estimateTokens };
 
 export function failing(status: number | undefined, name = 'mock'): MockProviderOptions {
   return {

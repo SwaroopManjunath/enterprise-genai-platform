@@ -57,6 +57,7 @@ describe('InMemoryCostTracker', () => {
         day: '2026-11-01',
         requests: 3,
         streamedRequests: 1,
+        estimatedRequests: 0,
         promptTokens: 300,
         completionTokens: 150,
         costMicroUsd: 750 + 750 + 20,
@@ -67,6 +68,14 @@ describe('InMemoryCostTracker', () => {
         },
       },
     ]);
+  });
+
+  it('counts estimated requests apart, so an interrupted stream is visible in the numbers', () => {
+    const tracker = new InMemoryCostTracker();
+    record(tracker, 'acme', { streamed: true, estimated: true });
+    record(tracker, 'acme');
+
+    expect(tracker.summary('acme', 1)[0]).toMatchObject({ requests: 2, estimatedRequests: 1 });
   });
 
   it('counts unpriced requests apart from priced spend', () => {

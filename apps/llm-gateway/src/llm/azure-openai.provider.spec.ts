@@ -91,3 +91,121 @@ describe('parseRetryAfter', () => {
     expect(parseRetryAfter('soon')).toBeUndefined();
   });
 });
+
+describe('AzureOpenAiProvider.chatStream', () => {
+  const sse = (...events: string[]): Response =>
+    new Response(events.map((e) => `data: ${e}\n\n`).join(''), {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    });
+  const chunk = (content: string, finish?: string) =>
+    JSON.stringify({ choices: [{ delta: { content }, finish_reason: finish ?? null }] });
+  const usageChunk = JSON.stringify({
+    choices: [],
+    usage: { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 },
+  });
+  const collect = async (provider: AzureOpenAiProvider) => {
+    const events = [];
+    for await (const event of provider.chatStream(request)) events.push(event);
+    return events;
+  };
+
+  it('asks for a stream with usage, and maps pieces, finish reason and usage', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValue(sse(chunk('Hel'), chunk('lo'), chunk('', 'stop'), usageChunk, '[DONE]'));
+    const provider = new AzureOpenAiProvider(config, 1000, fetchMock);
+
+    const events = await collect(provider);
+
+    const sent = JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string);
+    expect(sent).toMatchObject({ stream: true, stream_options: { include_usage: true } });
+    expect(events).toEqual([
+      { type: 'delta', text: 'Hel' },
+      { type: 'delta', text: 'lo' },
+      {
+        type: 'done',
+        finishReason: 'stop',
+        usage: { promptTokens: 7, completionTokens: 3, totalTokens: 10 },
+        provider: 'aoai-primary',
+      },
+    ]);
+  });
+
+  it('reports zero usage when the deployment sends none, so the gateway can estimate', async () => {
+    const fetchMock = jest.fn().mockResolvedValue(sse(chunk('hi', 'stop'), '[DONE]'));
+
+    const events = await collect(new AzureOpenAiProvider(config, 1000, fetchMock));
+
+    expect(events.at(-1)).toMatchObject({ type: 'done', usage: { totalTokens: 0 } });
+  });
+
+  it('classifies an error status before the stream starts, like a normal call', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValue(new Response('', { status: 429, headers: { 'retry-after': '2' } }));
+
+    const error = await collect(new AzureOpenAiProvider(config, 1000, fetchMock)).catch(
+      (e: ProviderError) => e,
+    );
+
+    expect(error).toBeInstanceOf(ProviderError);
+    expect(error).toMatchObject({ status: 429, retryAfterMs: 2000, retryable: true });
+  });
+
+  it('treats a network failure as retryable and fallbackable', async () => {
+    const fetchMock = jest.fn().mockRejectedValue(new Error('socket hang up'));
+
+    const error = await collect(new AzureOpenAiProvider(config, 1000, fetchMock)).catch(
+      (e: ProviderError) => e,
+    );
+
+    expect(error).toMatchObject({ retryable: true, fallbackable: true });
+  });
+
+  it('fails clearly on a malformed stream', async () => {
+    const fetchMock = jest.fn().mockResolvedValue(sse(chunk('ok'), '{not json'));
+
+    const error = await collect(new AzureOpenAiProvider(config, 1000, fetchMock)).catch(
+      (e: ProviderError) => e,
+    );
+
+    expect(error).toBeInstanceOf(ProviderError);
+    expect((error as ProviderError).status).toBe(502);
+  });
+
+  it('cuts a stream that goes quiet, but not one that is merely long', async () => {
+    const quiet = jest.fn().mockImplementation((_url: string, init: RequestInit) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(`data: ${chunk('start')}\n\n`));
+          init.signal?.addEventListener('abort', () => controller.error(new Error('aborted')));
+        },
+      });
+      return Promise.resolve(new Response(body, { status: 200 }));
+    });
+
+    const error = await collect(new AzureOpenAiProvider(config, 50, quiet)).catch(
+      (e: ProviderError) => e,
+    );
+
+    expect(error).toBeInstanceOf(ProviderError);
+    expect((error as ProviderError).message).toMatch(/quiet|failed/);
+  });
+
+  it('closes the connection when the caller stops reading', async () => {
+    let aborted = false;
+    const fetchMock = jest.fn().mockImplementation((_url: string, init: RequestInit) => {
+      init.signal?.addEventListener('abort', () => {
+        aborted = true;
+      });
+      return Promise.resolve(sse(chunk('a'), chunk('b'), '[DONE]'));
+    });
+    const stream = new AzureOpenAiProvider(config, 1000, fetchMock).chatStream(request);
+
+    await stream.next();
+    await stream.return(undefined);
+
+    expect(aborted).toBe(true);
+  });
+});

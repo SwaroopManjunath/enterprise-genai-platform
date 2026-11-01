@@ -1,5 +1,6 @@
 import { failing, MockProvider } from '../llm/mock.provider';
-import type { ProviderError } from '../llm/provider-error';
+import { ProviderError } from '../llm/provider-error';
+import type { LlmProvider } from '../llm/types';
 import { AllProvidersFailedError, LlmRouter } from './llm-router';
 
 const request = { messages: [{ role: 'user' as const, content: 'ping' }] };
@@ -77,5 +78,103 @@ describe('LlmRouter', () => {
 
   it('rejects an empty provider list at construction', () => {
     expect(() => new LlmRouter([], retry)).toThrow(/at least one/);
+  });
+});
+
+describe('LlmRouter.chatStream', () => {
+  const drain = async (router: LlmRouter) => {
+    const events = [];
+    for await (const event of router.chatStream(request)) events.push(event);
+    return events;
+  };
+  const text = (events: { type: string; text?: string }[]) =>
+    events.flatMap((e) => (e.type === 'delta' ? [e.text] : [])).join('');
+
+  it('streams from the primary and tags each event with who served it', async () => {
+    const router = new LlmRouter(
+      [new MockProvider({ name: 'primary' }), new MockProvider({ name: 'secondary' })],
+      retry,
+    );
+
+    const events = await drain(router);
+
+    expect(text(events)).toBe('echo: ping');
+    expect(events.every((e) => e.provider === 'primary' && !e.fallbackUsed)).toBe(true);
+  });
+
+  it('falls back to the secondary when the primary fails before sending anything', async () => {
+    const primary = new MockProvider(failing(503, 'primary'));
+    const router = new LlmRouter([primary, new MockProvider({ name: 'secondary' })], retry);
+
+    const events = await drain(router);
+
+    expect(primary.calls).toBe(2); // retried first
+    expect(text(events)).toBe('echo: ping');
+    expect(events.every((e) => e.provider === 'secondary' && e.fallbackUsed)).toBe(true);
+  });
+
+  it('does not start a second answer when the primary breaks after sending text', async () => {
+    const secondary = new MockProvider({ name: 'secondary' });
+    const broken: LlmProvider = {
+      name: 'primary',
+      chat: () => Promise.reject(new Error('unused')),
+      async *chatStream() {
+        yield { type: 'delta', text: 'partial ' };
+        throw new ProviderError('primary', 'connection reset', { status: 503 });
+      },
+    };
+    const router = new LlmRouter([broken, secondary], retry);
+
+    const received: string[] = [];
+    const error = await (async () => {
+      try {
+        for await (const e of router.chatStream(request))
+          if (e.type === 'delta') received.push(e.text);
+      } catch (e) {
+        return e;
+      }
+    })();
+
+    expect(received).toEqual(['partial ']);
+    expect(error).toBeInstanceOf(ProviderError);
+    expect(secondary.calls).toBe(0);
+  });
+
+  it('throws straight away for a request every deployment would reject', async () => {
+    const secondary = new MockProvider({ name: 'secondary' });
+    const router = new LlmRouter([new MockProvider(failing(400, 'primary')), secondary], retry);
+
+    await expect(drain(router)).rejects.toMatchObject({ status: 400 });
+    expect(secondary.calls).toBe(0);
+  });
+
+  it('fails when every deployment is down', async () => {
+    const router = new LlmRouter(
+      [new MockProvider(failing(503, 'a')), new MockProvider(failing(503, 'b'))],
+      retry,
+    );
+
+    await expect(drain(router)).rejects.toBeInstanceOf(AllProvidersFailedError);
+  });
+
+  it('closes the underlying stream when the caller stops early', async () => {
+    let closed = false;
+    const provider: LlmProvider = {
+      name: 'p',
+      chat: () => Promise.reject(new Error('unused')),
+      async *chatStream() {
+        try {
+          for (;;) yield { type: 'delta', text: 'x' };
+        } finally {
+          closed = true;
+        }
+      },
+    };
+    const stream = new LlmRouter([provider], retry).chatStream(request);
+
+    await stream.next();
+    await stream.return(undefined);
+
+    expect(closed).toBe(true);
   });
 });
