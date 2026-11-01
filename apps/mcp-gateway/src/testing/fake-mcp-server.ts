@@ -50,6 +50,10 @@ export class FakeMcpServer {
 
   constructor(private options: FakeMcpOptions) {}
 
+  get tools(): FakeTool[] {
+    return this.options.tools;
+  }
+
   setTools(tools: FakeTool[]): void {
     this.options = { ...this.options, tools };
   }

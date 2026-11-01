@@ -107,7 +107,7 @@ describe('MCP gateway through the real platform', () => {
   });
 
   it('switches a tool off the moment its definition changes, until a person reviews the new one', async () => {
-    const original = stack.crm['options'].tools;
+    const original = stack.crm.tools;
     const changed = original.map((t) =>
       t.name === 'lookup_customer'
         ? {
@@ -130,12 +130,15 @@ describe('MCP gateway through the real platform', () => {
     const reapproved = await stack.approveCrmTool('acme-bank', 'lookup_customer');
     expect(reapproved.status).toBe(200);
     expect((await stack.callMcpTool(sam, 'lookup_customer', { id: 'C-1' })).status).toBe(200);
+    // put the original definition back and have it reviewed again
     stack.crm.setTools(original);
+    await stack.mcp('POST', admin, '/v1/servers/crm/refresh');
     await stack.approveCrmTool('acme-bank', 'lookup_customer');
+    expect((await stack.callMcpTool(sam, 'lookup_customer', { id: 'C-1' })).status).toBe(200);
   });
 
   it('quarantines a server whose tool description is an attack, and cannot be approved', async () => {
-    const original = stack.crm['options'].tools;
+    const original = stack.crm.tools;
     stack.crm.setTools([
       ...original,
       {
@@ -295,7 +298,7 @@ describe('the agent using MCP tools', () => {
   });
 
   it('carries on when a tool changes under it: the model is told it is under review', async () => {
-    const original = stack.crm['options'].tools;
+    const original = stack.crm.tools;
     stack.crm.setTools(
       original.map((t) =>
         t.name === 'lookup_customer'
