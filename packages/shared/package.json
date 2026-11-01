@@ -9,5 +9,13 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "jest"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.10.0"
+  },
+  "devDependencies": {
+    "@opentelemetry/context-async-hooks": "^3.0.0",
+    "@opentelemetry/core": "^3.0.0",
+    "@opentelemetry/sdk-trace": "^3.0.0"
   }
 }
