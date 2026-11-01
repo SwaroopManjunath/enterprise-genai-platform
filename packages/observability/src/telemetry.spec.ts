@@ -1,6 +1,7 @@
 import { context, propagation, trace } from '@opentelemetry/api';
 import { optionsFromEnv } from './config';
 import { initTelemetry, type Telemetry } from './telemetry';
+import { metricsFor } from './metrics';
 import { getTracer, setAttributes, withSpan } from './tracing';
 
 let telemetry: Telemetry;
@@ -59,6 +60,30 @@ describe('optionsFromEnv', () => {
   it('refuses a nonsense metrics port', () => {
     expect(() => optionsFromEnv('a', { METRICS_PORT: 'abc' })).toThrow(/METRICS_PORT/);
     expect(() => optionsFromEnv('a', { METRICS_PORT: '70000' })).toThrow(/METRICS_PORT/);
+  });
+});
+
+describe('the metrics endpoint', () => {
+  it('is reachable over IPv4, not only on the IPv6 loopback, so another host can scrape it', async () => {
+    const port = 20000 + Math.floor(Math.random() * 20000);
+    telemetry = initTelemetry({
+      serviceName: 'test',
+      traces: 'off',
+      metrics: 'prometheus',
+      metricsPort: port,
+    });
+    metricsFor('test').count('answers', { outcome: 'grounded' });
+
+    const response = await fetch(`http://127.0.0.1:${port}/metrics`);
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('genai_assistant_answers_total');
+  });
+
+  it('reads the address to listen on from the environment', () => {
+    expect(optionsFromEnv('a', { METRICS_PORT: '9464', METRICS_HOST: '127.0.0.1' })).toMatchObject({
+      metricsHost: '127.0.0.1',
+    });
   });
 });
 
