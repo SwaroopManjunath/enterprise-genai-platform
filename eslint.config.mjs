@@ -1,5 +1,6 @@
 import js from '@eslint/js';
 import prettier from 'eslint-config-prettier';
+import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
@@ -19,6 +20,11 @@ export default tseslint.config(
   {
     files: ['**/*.cjs'],
     languageOptions: { sourceType: 'commonjs', globals: { module: 'writable' } },
+  },
+  {
+    // Scripts that run under Node outside the TypeScript build (the compose smoke test).
+    files: ['deploy/**/*.mjs'],
+    languageOptions: { globals: globals.node },
   },
   {
     rules: {

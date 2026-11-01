@@ -1,0 +1,10 @@
+{
+  "assistant": { "secret": "dev-assistant-secret", "audience": "api://assistant" },
+  "agents-app": { "secret": "dev-agents-secret", "audience": "api://agents" },
+  "mcp-gateway": { "secret": "dev-mcp-secret", "audience": "api://mcp-gateway" },
+  "ingestion": {
+    "secret": "dev-ingestion-secret",
+    "audience": "api://ingestion",
+    "roles": ["indexer"]
+  }
+}
