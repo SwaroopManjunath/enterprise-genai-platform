@@ -39,6 +39,26 @@ describe('LexicalJudge', () => {
     expect(result.claims[0]?.reason).toMatch(/number 10/);
   });
 
+  it('rejects a right number with the wrong unit', async () => {
+    const limits = ['The daily card payment limit is 2500 euros.'];
+
+    expect(
+      (await judge.groundedness('The daily card payment limit is 2500 dollars.', limits)).score,
+    ).toBe(0);
+    expect(
+      (await judge.groundedness('The daily card payment limit is 2500 euros.', limits)).score,
+    ).toBe(1);
+  });
+
+  it('does not count a redaction marker against an answer that quoted a source', async () => {
+    const result = await judge.groundedness(
+      'Refund payouts are sent every Friday from the account [REDACTED:IBAN].',
+      ['Refund payouts are sent every Friday from the account DE89 3704 0044 0532 0130 00.'],
+    );
+
+    expect(result.score).toBe(1);
+  });
+
   it('treats a number written as a word the same as the digit', async () => {
     expect((await check('Refunds reach the original card within 5 working days.')).score).toBe(1);
   });

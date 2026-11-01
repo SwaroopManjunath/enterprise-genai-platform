@@ -87,6 +87,22 @@ export function numbersIn(text: string): string[] {
   return normalizeNumberWords(words(text)).filter((w) => /^\d/.test(w));
 }
 
+/**
+ * Each number with the word after it ("5 working", "2500 euro"), so a right number with the wrong
+ * unit does not pass. A number followed by nothing worth comparing is skipped.
+ */
+export function numberUnits(text: string): string[] {
+  const list = normalizeNumberWords(words(text));
+  const pairs: string[] = [];
+  list.forEach((w, i) => {
+    const next = list[i + 1];
+    if (/^\d/.test(w) && next !== undefined && !/^\d/.test(next) && !STOPWORDS.has(next)) {
+      pairs.push(`${w} ${stem(next)}`);
+    }
+  });
+  return pairs;
+}
+
 export function negationsIn(text: string): string[] {
   return [...new Set(words(text).filter((w) => NEGATIONS.has(w)))].sort();
 }
