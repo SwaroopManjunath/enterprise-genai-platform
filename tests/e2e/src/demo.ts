@@ -267,9 +267,11 @@ async function costDemo(): Promise<void> {
         '# Card refunds\nRefunds for card payments are credited to the original card within five working days after approval, the bank then sends a confirmation message to the customer by email, and the customer can follow every step in the mobile app under Payments.',
     });
     const cacheLine = (r: HttpResult) =>
-      r.body.cache.status === 'hit'
-        ? `cache HIT (${r.body.cache.kind}, saved ${r.body.cache.savedTokens} tokens / $${(r.body.cache.savedMicroUsd / 1e6).toFixed(6)})`
-        : `cache ${r.body.cache.status}, model called`;
+      r.body.cache === undefined
+        ? 'nothing this user may see matched: no model call, nothing cached'
+        : r.body.cache.status === 'hit'
+          ? `cache HIT (${r.body.cache.kind}, saved ${r.body.cache.savedTokens} tokens / $${(r.body.cache.savedMicroUsd / 1e6).toFixed(6)})`
+          : `cache ${r.body.cache.status}, model called`;
 
     console.log('\nThe answer cache (serving):');
     for (const question of [
@@ -285,7 +287,18 @@ async function costDemo(): Promise<void> {
     console.log(
       "\nIt cannot hand one person another person's answer (same question, different documents):",
     );
-    const both = 'Which salary bands apply to managers and how long do refunds take?';
+    await stack.uploadAndWait('acme-bank', {
+      documentId: 'bonus-open',
+      filename: 'bonus-open.md',
+      content: '# Bonus\nThe bonus is paid in March.',
+    });
+    await stack.uploadAndWait('acme-bank', {
+      documentId: 'bonus-managers',
+      filename: 'bonus-managers.md',
+      content: '# Manager bonus\nThe manager bonus is paid in March with a target of 15 percent.',
+      allowedRoles: ['manager'],
+    });
+    const both = 'When is the manager bonus paid?';
     for (const [name, who] of [
       ['Alice (manager)', alice],
       ['Bob (analyst)', bob],
@@ -293,7 +306,7 @@ async function costDemo(): Promise<void> {
       ['Alice again', alice],
     ] as const) {
       const r = await stack.ask(who, both);
-      const sawSalary = JSON.stringify(r.body.citations).includes('salary-bands');
+      const sawSalary = JSON.stringify(r.body.citations).includes('bonus-managers');
       console.log(
         `  ${name.padEnd(16)} -> ${cacheLine(r)}; answer ${sawSalary ? 'uses' : 'does not use'} the manager-only document`,
       );

@@ -1,0 +1,19 @@
+{
+  "cases": 38,
+  "judgeAccuracy": 1,
+  "metrics": {
+    "caseAccuracy": 1,
+    "retrievalRecallAtK": 1,
+    "retrievalMRR": 1,
+    "retrievalLeaks": 0,
+    "answerRate": 1,
+    "abstentionAccuracy": 1,
+    "blockAccuracy": 1,
+    "factRecall": 1,
+    "groundedness": 1,
+    "citationPrecision": 1,
+    "citationRecall": 1,
+    "forbiddenRate": 0,
+    "avgTokens": 245.82857142857142
+  }
+}

@@ -5,7 +5,6 @@ const manager = { tenant: 'acme-bank', userId: 'alice', roles: ['manager'] };
 const globexUser = { tenant: 'globex', userId: 'gina', roles: ['analyst'] };
 
 const REFUNDS = 'How long do refunds take?';
-const BOTH = 'Which salary bands apply to managers and how long do refunds take?';
 
 const LONG_DOC = {
   documentId: 'refund-details',
@@ -13,6 +12,20 @@ const LONG_DOC = {
   content:
     '# Card refunds\nRefunds for card payments are credited to the original card within five working days after approval, the bank then sends a confirmation message to the customer by email, and the customer can follow every step in the mobile app under Payments.',
 };
+
+/** Two documents on one topic: managers are shown both, everyone else only the first. */
+const BONUS_OPEN = {
+  documentId: 'bonus-open',
+  filename: 'bonus-open.md',
+  content: '# Bonus\nThe bonus is paid in March.',
+};
+const BONUS_MANAGERS = {
+  documentId: 'bonus-managers',
+  filename: 'bonus-managers.md',
+  content: '# Manager bonus\nThe manager bonus is paid in March with a target of 15 percent.',
+  allowedRoles: ['manager'],
+};
+const BONUS_QUESTION = 'When is the manager bonus paid?';
 
 const poll = async <T>(read: () => Promise<T>, done: (value: T) => boolean, timeoutMs = 3000) => {
   const deadline = Date.now() + timeoutMs;
@@ -58,6 +71,8 @@ describe('the answer cache over the real services', () => {
   beforeAll(async () => {
     stack = await startStack({ cacheMode: 'serve' });
     await seedDocuments(stack);
+    expect((await stack.uploadAndWait('acme-bank', BONUS_OPEN)).status).toBe('succeeded');
+    expect((await stack.uploadAndWait('acme-bank', BONUS_MANAGERS)).status).toBe('succeeded');
   });
   afterAll(async () => {
     await stack.stop();
@@ -97,22 +112,47 @@ describe('the answer cache over the real services', () => {
   });
 
   describe('it cannot be used to read what you may not read', () => {
-    it('never gives an analyst the manager’s answer, nor the reverse, for the very same question', async () => {
-      const asManager = await stack.ask(manager, BOTH);
-      const asAnalyst = await stack.ask(analyst, BOTH);
+    it('never gives an analyst the manager’s answer for the very same question', async () => {
+      const question = 'What are the salary bands for managers?';
+      const asManager = await stack.ask(manager, question);
+      const asAnalyst = await stack.ask(analyst, question);
 
       expect(asManager.body.cache.status).toBe('miss');
       expect(JSON.stringify(asManager.body.citations)).toContain('salary-bands');
-      expect(asAnalyst.body.cache.status).toBe('miss'); // different documents: different fingerprint
-      expect(JSON.stringify(asAnalyst.body)).not.toMatch(/M1|salary-bands/);
+      // the analyst is shown different documents, so a different fingerprint: no hit, and no M1
+      expect(asAnalyst.body.cache?.status).not.toBe('hit');
+      expect(JSON.stringify(withoutNoise(asAnalyst.body))).not.toMatch(/M1|salary-bands/);
 
-      // each now gets their own answer back from the cache, and still only their own
-      const analystAgain = await stack.ask(analyst, BOTH);
-      const managerAgain = await stack.ask(manager, BOTH);
-      expect(analystAgain.body.cache.status).toBe('hit');
-      expect(JSON.stringify(analystAgain.body)).not.toMatch(/M1|salary-bands/);
+      // the manager's own answer is served back to the manager, and still not to the analyst
+      const managerAgain = await stack.ask(manager, question);
+      const analystAgain = await stack.ask(analyst, question);
       expect(managerAgain.body.cache.status).toBe('hit');
       expect(JSON.stringify(managerAgain.body.citations)).toContain('salary-bands');
+      expect(analystAgain.body.cache?.status).not.toBe('hit');
+      expect(JSON.stringify(withoutNoise(analystAgain.body))).not.toMatch(/M1|salary-bands/);
+    });
+
+    it('keeps two users who both get an answer, from different documents, apart', async () => {
+      const asManager = await stack.ask(manager, BONUS_QUESTION);
+      const asAnalyst = await stack.ask(analyst, BONUS_QUESTION);
+
+      expect(asManager.body.cache.status).toBe('miss');
+      expect(asManager.body.answer).toMatch(/15 percent/);
+      expect(JSON.stringify(asManager.body.citations)).toContain('bonus-managers');
+      // the analyst is shown only the open document: a different fingerprint, so no hit and no secret
+      expect(asAnalyst.body.cache.status).toBe('miss');
+      expect(asAnalyst.body.answer).toMatch(/March/);
+      expect(JSON.stringify(withoutNoise(asAnalyst.body))).not.toMatch(/15 percent|bonus-managers/);
+
+      // each now gets their own answer back from the cache, and still only their own
+      const analystAgain = await stack.ask(analyst, BONUS_QUESTION);
+      const managerAgain = await stack.ask(manager, BONUS_QUESTION);
+      expect(analystAgain.body.cache.status).toBe('hit');
+      expect(JSON.stringify(withoutNoise(analystAgain.body))).not.toMatch(
+        /15 percent|bonus-managers/,
+      );
+      expect(managerAgain.body.cache.status).toBe('hit');
+      expect(managerAgain.body.answer).toMatch(/15 percent/);
     });
 
     it('stops serving an answer the moment the access to a document it used is taken away', async () => {
@@ -133,7 +173,8 @@ describe('the answer cache over the real services', () => {
       const after = await stack.ask(manager, 'What are the salary bands for managers?');
 
       expect(JSON.stringify(after.body)).not.toMatch(/M1/);
-      expect(after.body.sourcesRetrieved).toBe(0);
+      expect(after.body.cache?.status).not.toBe('hit');
+      expect(JSON.stringify(after.body.citations ?? [])).not.toContain('salary-bands');
     });
 
     it('keeps tenants apart even for the same question over identically worded documents', async () => {
@@ -145,8 +186,8 @@ describe('the answer cache over the real services', () => {
     });
 
     it('does not serve a stale answer after the document it came from changed', async () => {
-      await stack.ask(analyst, 'How quickly are refunds paid out?');
-      const cached = await stack.ask(analyst, 'How quickly are refunds paid out?');
+      await stack.ask(analyst, 'How long do refunds take to reach the card?');
+      const cached = await stack.ask(analyst, 'How long do refunds take to reach the card?');
       expect(cached.body.cache.status).toBe('hit');
 
       const updated = await stack.uploadAndWait('acme-bank', {
@@ -157,7 +198,7 @@ describe('the answer cache over the real services', () => {
       });
       expect(updated.status).toBe('succeeded');
 
-      const fresh = await stack.ask(analyst, 'How quickly are refunds paid out?');
+      const fresh = await stack.ask(analyst, 'How long do refunds take to reach the card?');
 
       expect(fresh.body.cache.status).toBe('miss');
       expect(fresh.body.answer).toMatch(/two working days/i);

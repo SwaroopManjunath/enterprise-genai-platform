@@ -217,6 +217,7 @@ describe('the real dataset', () => {
     expect(Object.keys(counts).sort()).toEqual([
       'faq',
       'injection',
+      'known-gaps',
       'multi-source',
       'no-answer',
       'paraphrase',
