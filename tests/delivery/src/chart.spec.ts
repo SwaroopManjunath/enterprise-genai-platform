@@ -275,6 +275,43 @@ suite('the Helm chart', () => {
     });
   });
 
+  describe('resources follow what the load test measured', () => {
+    const measured = JSON.parse(
+      readFileSync(resolve(ROOT, 'docs/proof/load-capacity-mock.json'), 'utf8'),
+    ) as {
+      peaks: Record<string, { cpu: number; mem: number }>;
+    };
+    const peak = (service: string, field: 'cpu' | 'mem'): number =>
+      Math.max(
+        ...Object.entries(measured.peaks)
+          .filter(([k]) => k.endsWith(`|${service}`))
+          .map(([, v]) => v[field]),
+      );
+    const mebi = (text: string): number => Number.parseInt(text, 10);
+
+    it.each(['assistant', 'llm-gateway', 'retrieval', 'prompt-registry'])(
+      '%s has a memory limit with headroom over the most it used under load',
+      (service) => {
+        const c = containerOf(workloads(docs).find((w) => w.metadata.name === service) as Manifest);
+        expect(mebi(c.resources.limits.memory)).toBeGreaterThanOrEqual(peak(service, 'mem') * 1.5);
+        expect(mebi(c.resources.requests.memory)).toBeLessThanOrEqual(
+          mebi(c.resources.limits.memory),
+        );
+      },
+    );
+
+    it('asks for enough CPU that the autoscaler adds a pod before the measured knee', () => {
+      // Throughput stopped growing near 380 requests a second, with the assistant at about 1.2 cores.
+      const assistant = containerOf(
+        workloads(docs).find((w) => w.metadata.name === 'assistant') as Manifest,
+      );
+      const requestCores = Number.parseInt(assistant.resources.requests.cpu, 10) / 1000;
+      const scaleOutAtCores = requestCores * 0.7;
+      const coresPerRequest = peak('assistant', 'cpu') / 100 / 600; // generous: peak CPU over the offered rate at 600
+      expect(scaleOutAtCores / coresPerRequest).toBeLessThan(380);
+    });
+  });
+
   describe('canary releases', () => {
     const withRollouts = enabled ? docs : [];
 

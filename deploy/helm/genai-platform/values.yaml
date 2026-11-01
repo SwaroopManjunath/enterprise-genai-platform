@@ -98,16 +98,27 @@ services:
     audience: api://gateway
     canary: true
     calls: []
+    # Measured (docs/proof/load-capacity-mock.md): about 0.25 core and 160 MiB at 800 requests a second.
+    resources:
+      requests: { cpu: 250m, memory: 128Mi }
+      limits: { memory: 384Mi }
     secrets:
       - { name: telemetry-pseudonym-salt, env: TELEMETRY_PSEUDONYM_SALT }
   prompt-registry:
     enabled: true
     audience: api://prompt-registry
     calls: []
+    resources:
+      requests: { cpu: 250m, memory: 128Mi }
+      limits: { memory: 384Mi }
   retrieval:
     enabled: true
     audience: api://retrieval
     calls: []
+    # The index is in memory today, so this grows with the corpus: 11 documents were measured.
+    resources:
+      requests: { cpu: 250m, memory: 192Mi }
+      limits: { memory: 512Mi }
   ingestion:
     enabled: true
     audience: api://ingestion
@@ -123,6 +134,12 @@ services:
     canary: true
     clientId: ''
     calls: [retrieval, prompt-registry, llm-gateway]
+    # Measured: it is the busiest service, about 0.5 core at 200 requests a second and 436 MiB near its
+    # limit of about 400. With the autoscaler at 70% of this request, a pod is added from about 130
+    # requests a second, well before the knee at about 380.
+    resources:
+      requests: { cpu: 500m, memory: 256Mi }
+      limits: { memory: 768Mi }
     secrets:
       - { name: assistant-client-secret }
     ingressAnnotations:
