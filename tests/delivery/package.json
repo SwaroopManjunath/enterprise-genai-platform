@@ -1,0 +1,14 @@
+{
+  "name": "@genai/delivery",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Checks that the Helm chart, the Terraform and the SLO definitions agree, and that the chart is safe by default.",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "jest"
+  },
+  "devDependencies": {
+    "@genai/observability": "0.1.0",
+    "yaml": "^2.8.0"
+  }
+}
