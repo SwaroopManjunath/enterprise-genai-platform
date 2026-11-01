@@ -25,3 +25,12 @@ resource "azurerm_role_assignment" "secrets_user" {
   role_definition_name = "Key Vault Secrets User"
   principal_id         = azurerm_user_assigned_identity.service[each.key].principal_id
 }
+
+# Who may put secrets in the vault. Granted explicitly, because with RBAC even the account that created
+# the vault cannot write to it.
+resource "azurerm_role_assignment" "secrets_officer" {
+  for_each             = toset(var.key_vault_secrets_officers)
+  scope                = azurerm_key_vault.main.id
+  role_definition_name = "Key Vault Secrets Officer"
+  principal_id         = each.value
+}

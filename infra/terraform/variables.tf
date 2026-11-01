@@ -92,3 +92,9 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "key_vault_secrets_officers" {
+  type        = list(string)
+  description = "Object ids of the people or groups who store secrets in the vault (Azure OpenAI keys, Entra client secrets). Nobody else can write to it, including whoever ran Terraform."
+  default     = []
+}
