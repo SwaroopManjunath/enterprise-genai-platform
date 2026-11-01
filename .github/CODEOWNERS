@@ -1,0 +1,6 @@
+# What counts as "good enough" is changed deliberately, by review, never as a side effect.
+# With branch protection's "require review from Code Owners" these need an owner's approval.
+/tests/evals/thresholds.json   @SwaroopManjunath
+/tests/evals/baseline.json     @SwaroopManjunath
+/tests/evals/datasets/         @SwaroopManjunath
+/.github/workflows/            @SwaroopManjunath

@@ -19,7 +19,10 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "prepare": "husky"
+    "prepare": "husky",
+    "eval": "npm run build -w @genai/shared && npm run build -w @genai/auth && npm run build -w @genai/guardrails && npm run eval -w @genai/evals",
+    "eval:selftest": "npm run build -w @genai/shared && npm run build -w @genai/auth && npm run build -w @genai/guardrails && npm run eval:selftest -w @genai/evals",
+    "eval:baseline": "npm run build -w @genai/shared && npm run build -w @genai/auth && npm run build -w @genai/guardrails && npm run eval:baseline -w @genai/evals"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.8.0",
