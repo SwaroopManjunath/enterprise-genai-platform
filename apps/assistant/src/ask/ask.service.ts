@@ -17,6 +17,8 @@ import type {
   RetrievalClient,
   SearchRequest,
 } from '../clients/service-clients';
+import type { CacheLayer } from '../cache/cache-layer';
+import { normalize } from '../cache/question-features';
 import { checkCitations, type Citation } from './citations';
 import { GuardrailBlockedError } from './errors';
 import { BUILTIN_PROMPT_TEMPLATE, fillTemplate } from './prompt';
@@ -24,6 +26,8 @@ import { formatSources, toSources } from './sources';
 
 export interface AskInput {
   question: string;
+  /** Ask for a freshly generated answer, skipping the answer cache. */
+  noCache?: boolean;
   topK?: number;
   filter?: SearchRequest['filter'];
 }
@@ -44,6 +48,27 @@ export interface GuardrailsReport {
   output?: OutputReport;
 }
 
+/** What the answer cache did for this request. */
+export interface CacheInfo {
+  status: 'hit' | 'miss' | 'bypass' | 'shadow';
+  /** For a hit: an exact repeat of an earlier question, or a close one. */
+  kind?: 'exact' | 'semantic';
+  similarity?: number;
+  /** Shadow mode only: a cached answer existed, and whether it matched the fresh one. */
+  wouldHit?: boolean;
+  agreed?: boolean;
+  /** For a hit: the model call this saved. */
+  savedTokens?: number;
+  savedMicroUsd?: number;
+}
+
+/** Where the time went, in milliseconds. `modelMs` is absent when no model was called. */
+export interface Timings {
+  totalMs: number;
+  retrievalMs: number;
+  modelMs?: number;
+}
+
 export interface AskResult {
   requestId: string;
   answer: string;
@@ -57,6 +82,9 @@ export interface AskResult {
   model?: { provider: string; fallbackUsed: boolean };
   prompt?: PromptInfo;
   guardrails: GuardrailsReport;
+  /** Absent when the answer cache is off. */
+  cache?: CacheInfo;
+  timings: Timings;
 }
 
 export const NO_SOURCES_ANSWER =
@@ -98,6 +126,8 @@ export class AskService {
       'gateway' | 'prompts' | 'retrieval' | 'promptName' | 'defaultTopK'
     >,
     private readonly guardrails: Guardrails,
+    private readonly cache?: CacheLayer,
+    private readonly clock: () => number = () => performance.now(),
   ) {}
 
   async ask(
@@ -107,6 +137,7 @@ export class AskService {
   ): Promise<AskResult> {
     const { retrieval, gateway, obo } = this.clients;
     const guardrails = this.guardrails;
+    const startedAt = this.clock();
 
     // 1. The question in: refuse an attack, mask sensitive data before it travels any further.
     const question = guardrails.checkQuestion(input.question);
@@ -121,6 +152,7 @@ export class AskService {
       },
       requestId,
     );
+    const retrievalMs = this.clock() - startedAt;
 
     // 2. The documents in: a passage that reads like an instruction never reaches the prompt.
     const screened = guardrails.screenSources(hits);
@@ -135,6 +167,7 @@ export class AskService {
         sourcesRetrieved: 0,
         droppedCitations: [],
         guardrails: { mode: guardrails.mode, question: question.report, sources: screened.report },
+        timings: { totalMs: this.clock() - startedAt, retrievalMs },
       };
     }
 
@@ -145,11 +178,51 @@ export class AskService {
       requestId,
     );
 
+    // The answer cache. The scope is built from what THIS user's retrieval just returned, so an
+    // answer made from documents one user can read can never be offered to someone who cannot.
+    const cacheScope =
+      this.cache && this.cache.mode !== 'off' && !input.noCache
+        ? this.cache.scope(caller.tenantId, sources, info, guardrails.mode)
+        : undefined;
+    if (this.cache && this.cache.mode !== 'off' && !cacheScope) {
+      this.cache.stats.record(caller.tenantId, { type: 'bypass' });
+    }
+    const cached = cacheScope ? this.cache?.lookup(cacheScope, question.text) : undefined;
+
+    if (this.cache && cacheScope && cached && this.cache.mode === 'serve') {
+      const { tokens, costMicroUsd } = cached.answer;
+      this.cache.stats.record(caller.tenantId, {
+        type: 'hit',
+        kind: cached.kind,
+        savedTokens: tokens,
+        savedMicroUsd: costMicroUsd,
+      });
+      return {
+        requestId,
+        answer: cached.answer.answer,
+        citations: cached.answer.citations,
+        grounded: true,
+        sourcesRetrieved: sources.length,
+        droppedCitations: [],
+        prompt: info,
+        guardrails: { mode: guardrails.mode, question: question.report, sources: screened.report },
+        cache: {
+          status: 'hit',
+          kind: cached.kind,
+          similarity: cached.similarity,
+          savedTokens: tokens,
+          savedMicroUsd: costMicroUsd,
+        },
+        timings: { totalMs: this.clock() - startedAt, retrievalMs },
+      };
+    }
+
     // A random marker in the confidential part of the prompt: it has no reason to ever appear in an
     // answer, so seeing it proves the model repeated its hidden instructions.
     const canary = `cnry-${randomBytes(8).toString('hex')}`;
     const system = `${rendered}\n\nConfidential marker (never output it): ${canary}`;
 
+    const modelStartedAt = this.clock();
     const completion = await gateway.chat(
       await obo.exchange(caller.accessToken, this.config.gateway.scope),
       [
@@ -159,6 +232,8 @@ export class AskService {
       requestId,
     );
 
+    const modelMs = this.clock() - modelStartedAt;
+
     // 3. The answer out: block a leak, redact sensitive data, strip image and HTML exfiltration.
     const instructionText = rendered.split(sourcesText).join('').split(question.text).join('');
     const output = guardrails.checkOutput(completion.message.content, {
@@ -166,6 +241,11 @@ export class AskService {
       instructionText: `${instructionText}\n${system.slice(rendered.length)}`,
     });
 
+    const timings = (): Timings => ({
+      totalMs: this.clock() - startedAt,
+      retrievalMs,
+      modelMs,
+    });
     const common = {
       requestId,
       sourcesRetrieved: sources.length,
@@ -187,20 +267,99 @@ export class AskService {
         citations: [],
         grounded: false,
         droppedCitations: [],
+        ...this.afterGeneration(caller.tenantId, cacheScope, question.text, cached, {
+          answer: BLOCKED_ANSWER,
+          citations: [],
+          cacheable: false,
+          tokens: completion.usage.totalTokens,
+          costMicroUsd: completion.cost?.microUsd ?? 0,
+        }),
+        timings: timings(),
       };
     }
 
     const checked = checkCitations(output.text, sources);
+    const citations = checked.citations.map((c) => ({
+      ...c,
+      excerpt: guardrails.redactForOutput(c.excerpt),
+    }));
+    const grounded = checked.citations.length > 0;
+
     return {
       ...common,
       answer: checked.answer,
-      citations: checked.citations.map((c) => ({
-        ...c,
-        excerpt: guardrails.redactForOutput(c.excerpt),
-      })),
-      grounded: checked.citations.length > 0,
+      citations,
+      grounded,
       droppedCitations: checked.droppedMarkers,
+      ...this.afterGeneration(caller.tenantId, cacheScope, question.text, cached, {
+        answer: checked.answer,
+        citations,
+        // Only a clean, grounded answer is worth keeping: nothing blocked, nothing invented.
+        cacheable:
+          grounded &&
+          checked.droppedMarkers.length === 0 &&
+          !output.report.wouldBlock &&
+          !output.blocked,
+        tokens: completion.usage.totalTokens,
+        costMicroUsd: completion.cost?.microUsd ?? 0,
+      }),
+      timings: timings(),
     };
+  }
+
+  /**
+   * After a fresh answer exists: keep it for next time, and in shadow mode record whether the
+   * cached one (had it been served) would have matched.
+   */
+  private afterGeneration(
+    tenantId: string,
+    scope: ReturnType<CacheLayer['scope']> | undefined,
+    question: string,
+    cached: ReturnType<CacheLayer['lookup']>,
+    fresh: {
+      answer: string;
+      citations: Citation[];
+      cacheable: boolean;
+      tokens: number;
+      costMicroUsd: number;
+    },
+  ): { cache?: CacheInfo } {
+    const layer = this.cache;
+    if (!layer || layer.mode === 'off') return {};
+    if (!scope) return { cache: { status: 'bypass' } };
+
+    if (fresh.cacheable) {
+      layer.store(scope, question, {
+        answer: fresh.answer,
+        citations: fresh.citations,
+        tokens: fresh.tokens,
+        costMicroUsd: fresh.costMicroUsd,
+      });
+    }
+
+    if (layer.mode === 'shadow') {
+      const agreed =
+        cached !== undefined && normalize(cached.answer.answer) === normalize(fresh.answer);
+      layer.stats.record(tenantId, {
+        type: 'shadow',
+        wouldHit: cached !== undefined,
+        ...(cached && {
+          agreed,
+          potentialSavedTokens: cached.answer.tokens,
+          potentialSavedMicroUsd: cached.answer.costMicroUsd,
+        }),
+      });
+      return {
+        cache: {
+          status: 'shadow',
+          wouldHit: cached !== undefined,
+          ...(cached && { kind: cached.kind, similarity: cached.similarity, agreed }),
+        },
+      };
+    }
+
+    layer.stats.record(tenantId, { type: 'miss' });
+    return { cache: { status: 'miss' } };
   }
 
   /**

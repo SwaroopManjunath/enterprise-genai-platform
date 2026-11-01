@@ -57,6 +57,8 @@ export interface ChatCompletion {
   usage: { promptTokens: number; completionTokens: number; totalTokens: number };
   provider: string;
   fallbackUsed: boolean;
+  /** What the call cost, as priced by the gateway. Absent from gateways that predate cost tracking. */
+  cost?: { microUsd: number; priced: boolean };
 }
 
 export class GatewayClient {

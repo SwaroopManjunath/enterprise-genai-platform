@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { CurrentPrincipal, type AuthenticatedPrincipal } from '@genai/auth';
-import { Body, Controller, Headers, HttpCode, Post, Res } from '@nestjs/common';
+import { CurrentPrincipal, RequireRoles, type AuthenticatedPrincipal } from '@genai/auth';
+import { Body, Controller, Get, Headers, HttpCode, Inject, Post, Res } from '@nestjs/common';
 import type { Response } from 'express';
+import { CacheStatsTracker } from '../cache/cache-stats';
 import { AskService } from './ask.service';
 import { askSchema } from './schemas';
 
@@ -30,5 +31,28 @@ export class AskController {
 
     res.setHeader('x-request-id', requestId);
     return result;
+  }
+}
+
+export const COST_VIEWER_ROLE = 'cost-viewer';
+
+/** How well the answer cache is working for the caller's tenant, and what it has saved. */
+@Controller('v1')
+@RequireRoles(COST_VIEWER_ROLE)
+export class CacheController {
+  constructor(@Inject(CacheStatsTracker) private readonly stats: CacheStatsTracker) {}
+
+  @Get('cache/stats')
+  statsFor(@CurrentPrincipal() caller: AuthenticatedPrincipal) {
+    const stats = this.stats.get(caller.tenantId);
+    return {
+      tenantId: caller.tenantId,
+      ...stats,
+      savedUsd: stats.savedMicroUsd / 1_000_000,
+      shadow: {
+        ...stats.shadow,
+        potentialSavedUsd: stats.shadow.potentialSavedMicroUsd / 1_000_000,
+      },
+    };
   }
 }

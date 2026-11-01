@@ -41,7 +41,28 @@ const envSchema = z.object({
         .filter(Boolean),
     )
     .pipe(z.array(z.enum(['secret', 'iban', 'card', 'email', 'phone']))),
+
+  /**
+   * `off` (default): no answer cache. `shadow`: look up and store but always answer freshly,
+   * recording how often the cache would have hit and how often it would have been right, to
+   * measure it on real traffic first. `serve`: answer from the cache on a hit.
+   */
+  CACHE_MODE: z.enum(['off', 'shadow', 'serve']).default('off'),
+  /** Minimum similarity for a close (not identical) question to reuse an answer. Floor 0.8. */
+  CACHE_SIMILARITY: z.coerce.number().min(0.8).max(1).default(0.92),
+  CACHE_TTL_MS: z.coerce.number().int().positive().default(3_600_000),
+  CACHE_MAX_ENTRIES_PER_TENANT: z.coerce.number().int().positive().default(500),
+  /** Change it to drop every cached answer at once (for instance after switching the model). */
+  CACHE_EPOCH: z.string().min(1).max(64).default('1'),
 });
+
+export interface CacheConfig {
+  mode: 'off' | 'shadow' | 'serve';
+  similarity: number;
+  ttlMs: number;
+  maxEntriesPerTenant: number;
+  epoch: string;
+}
 
 export interface DownstreamConfig {
   url: string;
@@ -58,6 +79,7 @@ export interface AssistantConfig {
   downstreamTimeoutMs: number;
   defaultTopK: number;
   guardrails: { mode: 'enforce' | 'monitor'; outputPii: PiiType[] };
+  cache: CacheConfig;
 }
 
 export const ASSISTANT_CONFIG = Symbol('ASSISTANT_CONFIG');
@@ -79,5 +101,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AssistantConfi
     downstreamTimeoutMs: e.DOWNSTREAM_TIMEOUT_MS,
     defaultTopK: e.DEFAULT_TOP_K,
     guardrails: { mode: e.GUARDRAILS_MODE, outputPii: e.GUARDRAILS_OUTPUT_PII },
+    cache: {
+      mode: e.CACHE_MODE,
+      similarity: e.CACHE_SIMILARITY,
+      ttlMs: e.CACHE_TTL_MS,
+      maxEntriesPerTenant: e.CACHE_MAX_ENTRIES_PER_TENANT,
+      epoch: e.CACHE_EPOCH,
+    },
   };
 }

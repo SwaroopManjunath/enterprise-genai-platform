@@ -54,4 +54,29 @@ describe('loadConfig', () => {
       expect(() => loadConfig({ ...required, GUARDRAILS_OUTPUT_PII: 'secret,passport' })).toThrow();
     });
   });
+
+  describe('answer cache settings', () => {
+    const required = { OBO_TOKEN_ENDPOINT: 'http://x.test/token', OBO_CLIENT_ID: 'assistant' };
+
+    it('is off by default, with conservative settings', () => {
+      expect(loadConfig(required).cache).toEqual({
+        mode: 'off',
+        similarity: 0.92,
+        ttlMs: 3_600_000,
+        maxEntriesPerTenant: 500,
+        epoch: '1',
+      });
+    });
+
+    it('reads the mode and tuning, and refuses an unknown mode or a dangerously loose similarity', () => {
+      expect(
+        loadConfig({ ...required, CACHE_MODE: 'shadow', CACHE_SIMILARITY: '0.95' }).cache,
+      ).toMatchObject({
+        mode: 'shadow',
+        similarity: 0.95,
+      });
+      expect(() => loadConfig({ ...required, CACHE_MODE: 'yes' })).toThrow();
+      expect(() => loadConfig({ ...required, CACHE_SIMILARITY: '0.5' })).toThrow();
+    });
+  });
 });
