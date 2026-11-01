@@ -63,6 +63,16 @@ role trimming apply to everything it reads.
 The ticket system and mailer are in-memory stand-ins behind interfaces; the point is the control
 around them.
 
+### Tools from the MCP gateway
+
+With `MCP_GATEWAY_URL` set, the agent also gets the tools the [MCP gateway](../mcp-gateway/README.md)
+allows **this user**, asked for on each request and named `<server>__<tool>`. The gateway has already
+checked roles, approval and the tool's definition; the agent adds nothing to widen that. The gateway's
+risk class carries over, so an MCP `write` tool pauses for the owner's approval exactly like a built-in
+one, and the tool is looked up again at approval, so one that was withdrawn does not run. Descriptions
+are screened again here, a built-in tool cannot be replaced by a name clash, and if the gateway is
+down the agent keeps its built-in tools and the run continues.
+
 ## API
 
 All routes need `Authorization: Bearer <JWT issued for the agent API>`.
@@ -129,6 +139,6 @@ See [ADR 0011](../../docs/adr/0011-agent-orchestrator.md) and, for the screening
 ## Tests
 
 ```bash
-npm test -w @genai/agents    # runner with misbehaving scripted models, tools, protocol, HTTP API
+npm test -w @genai/agents    # runner with misbehaving scripted models, tools (incl. MCP), protocol, HTTP API
 npm test -w @genai/e2e       # the real services together, including the agent
 ```
