@@ -1,0 +1,10 @@
+# Raises the limits that exist to protect a shared deployment, so a load test measures the platform
+# and not the per-tenant rate limit. Used only by tests/load/run.sh.
+services:
+  llm-gateway:
+    environment:
+      DEFAULT_REQUESTS_PER_MINUTE: '100000000'
+      DEFAULT_DAILY_TOKEN_QUOTA: '100000000000'
+  assistant:
+    environment:
+      CACHE_MODE: ${CACHE_MODE:-off}

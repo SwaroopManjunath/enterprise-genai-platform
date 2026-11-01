@@ -16,8 +16,14 @@ const AUDIENCE = { ingestion: 'api://ingestion', assistant: 'api://assistant' };
 const PROM = process.env.PROMETHEUS_URL ?? 'http://prometheus:9090';
 const JAEGER = process.env.JAEGER_URL ?? 'http://jaeger:16686';
 
-const token = (service, tenant, roles = []) =>
-  issuer.mint({ tenant, userId: 'smoke-user', roles, audience: AUDIENCE[service] });
+const token = (service, tenant, roles = [], expiresInSec) =>
+  issuer.mint({
+    tenant,
+    userId: 'smoke-user',
+    roles,
+    audience: AUDIENCE[service],
+    ...(expiresInSec && { expiresInSec }),
+  });
 const call = async (method, service, path, tok, body) => {
   const res = await fetch(`${URLS[service]}${path}`, {
     method,
@@ -51,9 +57,38 @@ async function traffic(seconds) {
   console.log(`status codes over ${seconds}s:`, counts);
 }
 
+/** Loads the evaluation corpus (mounted at /datasets) and waits until every document is searchable. */
+async function seed() {
+  const corpus = JSON.parse(readFileSync('/datasets/corpus.json', 'utf8'));
+  for (const doc of corpus.documents) {
+    const admin = token('ingestion', doc.tenant, ['document-admin']);
+    const res = await call('POST', 'ingestion', '/v1/documents', admin, {
+      documentId: doc.documentId,
+      filename: doc.filename,
+      content: doc.content,
+      ...(doc.allowedRoles && { allowedRoles: doc.allowedRoles }),
+    });
+    let status = 'queued';
+    for (let i = 0; i < 200 && !['succeeded', 'unchanged', 'failed'].includes(status); i++) {
+      await sleep(100);
+      status = (await call('GET', 'ingestion', `/v1/ingestions/${res.body.jobId}`, admin)).body
+        .status;
+    }
+    if (!['succeeded', 'unchanged'].includes(status))
+      throw new Error(`${doc.documentId}: ${status}`);
+  }
+  console.log(`seeded ${corpus.documents.length} documents`);
+}
+
 async function main() {
   const [command = 'check', arg] = process.argv.slice(2);
   if (command === 'traffic') return traffic(Number(arg ?? 60));
+  if (command === 'token') {
+    // a bearer token for the assistant, for a load generator: token <seconds it stays valid>
+    console.log(token('assistant', 'acme-bank', ['analyst'], Number(arg ?? 3600)));
+    return;
+  }
+  if (command === 'seed') return seed();
 
   console.log('1. a document goes in, and becomes searchable');
   const upload = await call(

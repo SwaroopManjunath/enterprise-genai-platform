@@ -1,0 +1,13 @@
+# Points the gateway at a real Azure OpenAI deployment. The values come from the shell that runs
+# compose, so no key is ever written to a file:
+#
+#   read -rs AZURE_OPENAI_API_KEY; export AZURE_OPENAI_API_KEY
+#   export AZURE_OPENAI_ENDPOINT=https://<resource>.openai.azure.com AZURE_OPENAI_DEPLOYMENT=<name>
+#   export MODEL_INPUT_USD_PER_MTOK=<price> MODEL_OUTPUT_USD_PER_MTOK=<price>
+services:
+  llm-gateway:
+    environment:
+      LLM_PROVIDER: azure
+      AZURE_OPENAI_DEPLOYMENTS: '[{"name":"azure-${AZURE_OPENAI_DEPLOYMENT:?set AZURE_OPENAI_DEPLOYMENT}","endpoint":"${AZURE_OPENAI_ENDPOINT:?set AZURE_OPENAI_ENDPOINT}","deployment":"${AZURE_OPENAI_DEPLOYMENT}","apiKeySecret":"aoai-key"}]'
+      SECRET_AOAI_KEY: ${AZURE_OPENAI_API_KEY:?set AZURE_OPENAI_API_KEY}
+      MODEL_PRICES: '{"azure-${AZURE_OPENAI_DEPLOYMENT}":{"inputPerMTok":${MODEL_INPUT_USD_PER_MTOK:-0},"outputPerMTok":${MODEL_OUTPUT_USD_PER_MTOK:-0}}}'
