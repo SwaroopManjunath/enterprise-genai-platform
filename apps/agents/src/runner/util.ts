@@ -1,18 +1,4 @@
-import { createHash } from 'node:crypto';
-
-/** JSON with sorted keys, so the same arguments always produce the same string. */
-export function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
-  const entries = Object.entries(value as Record<string, unknown>)
-    .sort(([a], [b]) => (a < b ? -1 : 1))
-    .map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`);
-  return `{${entries.join(',')}}`;
-}
-
-/** A short fingerprint for audit: proves which arguments ran without storing them. */
-export const digest = (value: unknown): string =>
-  createHash('sha256').update(stableStringify(value)).digest('hex').slice(0, 16);
+export { digest, stableStringify } from '@genai/shared';
 
 export class TimeoutError extends Error {
   constructor(what: string, ms: number) {
