@@ -1,4 +1,4 @@
-import { contentWords, negationsIn, numbersIn, sentences, stripMarkers } from './text';
+import { contentWords, negationsIn, numberUnits, numbersIn, sentences, stripMarkers } from './text';
 
 export interface ClaimVerdict {
   claim: string;
@@ -24,6 +24,9 @@ export interface Judge {
 const score = (claims: ClaimVerdict[]): number =>
   claims.length === 0 ? 1 : claims.filter((c) => c.supported).length / claims.length;
 
+/** What the guardrails put where they removed sensitive data: not a claim, and not in the sources. */
+const REDACTION = /\[REDACTED:[A-Z_]+\]/g;
+
 const ABSTAINING = /could not find|do not know|cannot provide|no information/i;
 
 /** The claims in an answer: its sentences, minus any that just decline to answer. */
@@ -33,7 +36,7 @@ export const claimsIn = (answer: string): string[] =>
 /**
  * A cheap, deterministic judge that needs no model. A claim is supported when:
  *  1. most of its content words appear in the sources,
- *  2. every number in it appears in the sources, and
+ *  2. every number in it appears in the sources, with the same unit after it, and
  *  3. it agrees with the best-matching source sentence about negation, so "refunds are paid" is not
  *     supported by "refunds are never paid".
  *
@@ -50,10 +53,11 @@ export class LexicalJudge implements Judge {
     const sourceText = sources.join(' ');
     const sourceWords = new Set(contentWords(sourceText));
     const sourceNumbers = new Set(numbersIn(sourceText));
+    const sourceUnits = new Set(numberUnits(sourceText));
     const sourceSentences = sources.flatMap((s) => sentences(s));
 
     const verdicts = claimsIn(answer).map((claim): ClaimVerdict => {
-      const words = contentWords(claim);
+      const words = contentWords(claim.replace(REDACTION, ''));
       if (words.length === 0) return { claim, supported: true };
 
       const overlap = words.filter((w) => sourceWords.has(w)).length / words.length;
@@ -72,6 +76,11 @@ export class LexicalJudge implements Judge {
           supported: false,
           reason: `the number ${missingNumber} is not in the sources`,
         };
+      }
+
+      const wrongUnit = numberUnits(claim).find((u) => !sourceUnits.has(u));
+      if (wrongUnit !== undefined) {
+        return { claim, supported: false, reason: `"${wrongUnit}" is not what the sources say` };
       }
 
       const best = bestSentence(words, sourceSentences);

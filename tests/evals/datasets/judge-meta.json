@@ -1,0 +1,180 @@
+{
+  "examples": [
+    {
+      "id": "restate",
+      "answer": "Refunds are paid to the original card within five working days. [1]",
+      "sources": ["Refunds are paid to the original card within five working days of approval."],
+      "grounded": true,
+      "note": "plain restatement with a marker"
+    },
+    {
+      "id": "digit-for-word",
+      "answer": "Refunds reach the original card within 5 working days.",
+      "sources": ["Refunds are paid to the original card within five working days of approval."],
+      "grounded": true,
+      "note": "a number written as a digit"
+    },
+    {
+      "id": "two-claims",
+      "answer": "A lost card can be blocked at any time in the mobile app. [1] Cards are never mailed abroad. [1]",
+      "sources": [
+        "A lost card can be blocked at any time in the mobile app. Cards are never mailed abroad."
+      ],
+      "grounded": true,
+      "note": "two supported claims"
+    },
+    {
+      "id": "rephrased",
+      "answer": "You can block a lost card in the mobile app whenever you like.",
+      "sources": [
+        "A lost card can be blocked at any time in the mobile app. Cards are never mailed abroad."
+      ],
+      "grounded": true,
+      "note": "reworded but supported: a judge that compares words rejects a faithful paraphrase",
+      "knownMiss": true
+    },
+    {
+      "id": "both-limits",
+      "answer": "The daily card payment limit is 2500 euros and the daily ATM cash limit is 1000 euros.",
+      "sources": [
+        "The daily card payment limit is 2500 euros. The daily cash withdrawal limit at ATMs is 1000 euros."
+      ],
+      "grounded": true,
+      "note": "two numbers, both present"
+    },
+    {
+      "id": "abstention",
+      "answer": "I could not find anything about that in the documents available to you.",
+      "sources": ["Refunds are paid to the original card within five working days of approval."],
+      "grounded": true,
+      "note": "declining is not a claim"
+    },
+    {
+      "id": "across-sources",
+      "answer": "Refunds are paid within five working days. A lost card can be blocked at any time in the mobile app.",
+      "sources": [
+        "Refunds are paid to the original card within five working days of approval.",
+        "A lost card can be blocked at any time in the mobile app. Cards are never mailed abroad."
+      ],
+      "grounded": true,
+      "note": "each claim from a different source"
+    },
+    {
+      "id": "bonus",
+      "answer": "The bonus target for managers is 15 percent of base salary. [1]",
+      "sources": [
+        "Salary bands for managers start at level M1 and are reviewed every year. The bonus target for managers is 15 percent of base salary."
+      ],
+      "grounded": true,
+      "note": "restricted fact, supported"
+    },
+    {
+      "id": "invented-claim",
+      "answer": "Refunds are paid within five working days. Premium customers receive them within one hour.",
+      "sources": ["Refunds are paid to the original card within five working days of approval."],
+      "grounded": false,
+      "note": "a second sentence nobody wrote"
+    },
+    {
+      "id": "wrong-number",
+      "answer": "Refunds are paid to the original card within ten working days.",
+      "sources": ["Refunds are paid to the original card within five working days of approval."],
+      "grounded": false,
+      "note": "the number is wrong"
+    },
+    {
+      "id": "wrong-limit",
+      "answer": "The daily card payment limit is 5000 euros.",
+      "sources": [
+        "The daily card payment limit is 2500 euros. The daily cash withdrawal limit at ATMs is 1000 euros."
+      ],
+      "grounded": false,
+      "note": "a number not in the sources"
+    },
+    {
+      "id": "wrong-unit",
+      "answer": "The daily card payment limit is 2500 dollars.",
+      "sources": [
+        "The daily card payment limit is 2500 euros. The daily cash withdrawal limit at ATMs is 1000 euros."
+      ],
+      "grounded": false,
+      "note": "right number, wrong currency"
+    },
+    {
+      "id": "negation-flip",
+      "answer": "Cards are mailed abroad.",
+      "sources": [
+        "A lost card can be blocked at any time in the mobile app. Cards are never mailed abroad."
+      ],
+      "grounded": false,
+      "note": "the opposite of the source"
+    },
+    {
+      "id": "negation-added",
+      "answer": "A lost card can never be blocked in the mobile app.",
+      "sources": [
+        "A lost card can be blocked at any time in the mobile app. Cards are never mailed abroad."
+      ],
+      "grounded": false,
+      "note": "a negation the source does not have"
+    },
+    {
+      "id": "off-topic",
+      "answer": "The office is closed on public holidays.",
+      "sources": ["Refunds are paid to the original card within five working days of approval."],
+      "grounded": false,
+      "note": "nothing to do with the sources"
+    },
+    {
+      "id": "fabricated-fact",
+      "answer": "Refunds are paid to the original card within five working days, minus a handling fee of 3 euros.",
+      "sources": ["Refunds are paid to the original card within five working days of approval."],
+      "grounded": false,
+      "note": "a plausible extra detail"
+    },
+    {
+      "id": "one-bad-of-three",
+      "answer": "A lost card can be blocked in the mobile app. Cards are never mailed abroad. Replacement cards arrive within two days.",
+      "sources": [
+        "A lost card can be blocked at any time in the mobile app. Cards are never mailed abroad."
+      ],
+      "grounded": false,
+      "note": "two supported claims and one invented"
+    },
+    {
+      "id": "no-source-support",
+      "answer": "The daily card payment limit is 2500 euros.",
+      "sources": ["Refunds are paid to the original card within five working days of approval."],
+      "grounded": false,
+      "note": "true elsewhere, but not in the sources it was given"
+    },
+    {
+      "id": "recombined",
+      "answer": "A lost card can be paid within five working days in the mobile app.",
+      "sources": [
+        "Refunds are paid to the original card within five working days of approval.",
+        "A lost card can be blocked at any time in the mobile app. Cards are never mailed abroad."
+      ],
+      "grounded": false,
+      "note": "words and numbers from the sources, recombined into something they do not say",
+      "knownMiss": true
+    },
+    {
+      "id": "swapped-subject",
+      "answer": "The daily cash withdrawal limit at ATMs is 2500 euros.",
+      "sources": [
+        "The daily card payment limit is 2500 euros. The daily cash withdrawal limit at ATMs is 1000 euros."
+      ],
+      "grounded": false,
+      "note": "the two numbers swapped between their subjects",
+      "knownMiss": true
+    },
+    {
+      "id": "scope-widened",
+      "answer": "Refunds are always paid to the original card within five working days of any request.",
+      "sources": ["Refunds are paid to the original card within five working days of approval."],
+      "grounded": false,
+      "note": "a stronger claim than the source makes"
+    }
+  ]
+}
