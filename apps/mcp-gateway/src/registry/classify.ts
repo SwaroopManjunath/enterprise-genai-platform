@@ -42,8 +42,8 @@ export interface Classified {
  *
  * A tool definition is text the model will read, written by a party we do not control, so it is
  * checked like any other untrusted text. "Tool poisoning" hides instructions in the description or
- * in a parameter's description. The hash covers the full text even though only a truncated
- * description is kept for display, so a change past the cut is still noticed.
+ * in a parameter's description, sometimes far down a long text, so a definition too long to review
+ * in full is quarantined rather than approved on a truncated view.
  */
 export function classifyTool(
   raw: RawTool,
@@ -69,10 +69,13 @@ export function classifyTool(
     reasons.push(...screened.report.signals.map((signal) => `injection:${signal}`));
   }
 
-  const description =
-    raw.description.length > limits.maxDescriptionChars
-      ? `${raw.description.slice(0, limits.maxDescriptionChars)}…`
-      : raw.description;
+  // A reviewer must be able to read everything they approve, so nothing is cut: a description
+  // too long to review is quarantined, and the stored text is only shortened to bound memory.
+  let description = raw.description;
+  if (description.length > limits.maxDescriptionChars) {
+    reasons.push('description_too_long');
+    description = `${description.slice(0, limits.maxDescriptionChars)}…`;
+  }
 
   return {
     record: { name: raw.name.slice(0, 64), description, inputSchema, hash },
