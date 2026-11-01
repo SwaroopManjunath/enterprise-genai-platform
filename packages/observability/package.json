@@ -8,7 +8,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "jest"
+    "test": "jest",
+    "ops:generate": "ts-node src/cli/generate-ops.ts",
+    "ops:check": "ts-node src/cli/generate-ops.ts --check"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",
@@ -31,6 +33,7 @@
     "@nestjs/testing": "^11.0.0",
     "@types/express": "^5.0.0",
     "@types/supertest": "^6.0.2",
-    "supertest": "^7.0.0"
+    "supertest": "^7.0.0",
+    "yaml": "^2.8.0"
   }
 }

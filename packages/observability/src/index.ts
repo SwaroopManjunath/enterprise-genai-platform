@@ -6,3 +6,4 @@ export * from './nest';
 export * from './sanitize';
 export * from './telemetry';
 export * from './tracing';
+export * from './slo';
