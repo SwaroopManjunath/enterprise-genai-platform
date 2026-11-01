@@ -159,7 +159,9 @@ async function main() {
   })();
   let ratio = [];
   let latency = [];
-  for (let i = 0; i < 40 && (ratio.length === 0 || latency.length === 0); i++) {
+  // A rate over too few scrapes is NaN (0 of 0), so wait for a number, not just for a series.
+  const ready = (series) => series.length === 1 && !Number.isNaN(Number(series[0].value[1]));
+  for (let i = 0; i < 45 && !(ready(ratio) && ready(latency)); i++) {
     await sleep(2000);
     ratio = await prom('slo:sli_error:ratio_rate5m{slo="assistant-availability"}');
     latency = await prom('slo:sli_error:ratio_rate5m{slo="assistant-latency"}');
