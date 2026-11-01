@@ -37,6 +37,7 @@ export class GatewayController {
       message: result.message,
       finishReason: result.finishReason,
       usage: result.usage,
+      cost: result.cost,
     };
   }
 }

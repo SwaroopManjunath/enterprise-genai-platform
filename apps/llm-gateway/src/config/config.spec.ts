@@ -37,4 +37,31 @@ describe('loadConfig', () => {
   it('fails fast on malformed deployment JSON', () => {
     expect(() => loadConfig({ AZURE_OPENAI_DEPLOYMENTS: '{nope' })).toThrow(/valid JSON/);
   });
+
+  describe('cost settings', () => {
+    it('has no prices and no budget by default', () => {
+      const config = loadConfig({});
+
+      expect(config.prices).toEqual({});
+      expect(config.dailyCostBudgetUsd).toBeUndefined();
+    });
+
+    it('reads prices per deployment and a daily budget', () => {
+      const config = loadConfig({
+        MODEL_PRICES: '{"aoai-primary":{"inputPerMTok":2.5,"outputPerMTok":10}}',
+        DAILY_COST_BUDGET_USD: '25.5',
+      });
+
+      expect(config.prices['aoai-primary']).toEqual({ inputPerMTok: 2.5, outputPerMTok: 10 });
+      expect(config.dailyCostBudgetUsd).toBe(25.5);
+    });
+
+    it('rejects malformed prices and a non-positive budget', () => {
+      expect(() => loadConfig({ MODEL_PRICES: 'not json' })).toThrow(/MODEL_PRICES/);
+      expect(() =>
+        loadConfig({ MODEL_PRICES: '{"x":{"inputPerMTok":-1,"outputPerMTok":1}}' }),
+      ).toThrow();
+      expect(() => loadConfig({ DAILY_COST_BUDGET_USD: '0' })).toThrow();
+    });
+  });
 });
