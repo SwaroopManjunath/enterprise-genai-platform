@@ -1,3 +1,11 @@
+import {
+  SpanKind,
+  SpanStatusCode,
+  context,
+  propagation,
+  trace,
+  type Span,
+} from '@opentelemetry/api';
 import { parseSse, type SseMessage } from './sse';
 
 /** A call to another service failed. `kind` says how; `status` and `code` come from its response. */
@@ -69,6 +77,7 @@ export class HttpJsonClient {
     headers: Record<string, string> = {},
   ): Promise<T> {
     const { baseUrl, timeoutMs } = this.options;
+    const call = this.startCall(method);
 
     let response: Response;
     try {
@@ -78,15 +87,17 @@ export class HttpJsonClient {
           'content-type': 'application/json',
           authorization: `Bearer ${token}`,
           ...headers,
+          ...call.headers,
         },
         ...(body !== undefined && { body: JSON.stringify(body) }),
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (error) {
-      throw this.transportError(error);
+      throw call.fail(this.transportError(error));
     }
 
-    if (!response.ok) throw await this.httpError(response);
+    if (!response.ok) throw call.fail(await this.httpError(response));
+    call.end(response.status);
     return (await response.json()) as T;
   }
 
@@ -116,6 +127,7 @@ export class HttpJsonClient {
       }, timeoutMs);
     };
 
+    const call = this.startCall('POST');
     arm();
     try {
       let response: Response;
@@ -127,29 +139,78 @@ export class HttpJsonClient {
             accept: 'text/event-stream',
             authorization: `Bearer ${token}`,
             ...headers,
+            ...call.headers,
           },
           body: JSON.stringify(body),
           signal: combined,
         });
       } catch (error) {
-        throw timedOut ? new DownstreamError(service, 'timeout') : this.transportError(error);
+        throw call.fail(
+          timedOut ? new DownstreamError(service, 'timeout') : this.transportError(error),
+        );
       }
-      if (!response.ok) throw await this.httpError(response);
-      if (!response.body) throw new DownstreamError(service, 'unreachable');
+      if (!response.ok) throw call.fail(await this.httpError(response));
+      if (!response.body) throw call.fail(new DownstreamError(service, 'unreachable'));
 
       try {
         for await (const message of parseSse(response.body)) {
           arm();
           yield message;
         }
+        call.end(response.status);
       } catch (error) {
-        if (signal?.aborted) return; // the caller hung up: not a failure
-        throw timedOut ? new DownstreamError(service, 'timeout') : this.transportError(error);
+        if (signal?.aborted) return call.end(response.status); // the caller hung up: not a failure
+        throw call.fail(
+          timedOut ? new DownstreamError(service, 'timeout') : this.transportError(error),
+        );
       }
     } finally {
       clearTimeout(idle);
       controller.abort();
+      call.end(); // a no-op once ended; closes the span if the consumer stopped reading
     }
+  }
+
+  /**
+   * One client span per call, and the `traceparent` header that lets the callee continue the trace.
+   * Only the downstream's name, the method and the outcome are recorded: never the path (it can hold
+   * an id), the body or the token. With no tracing set up this does nothing.
+   */
+  private startCall(method: HttpMethod): {
+    headers: Record<string, string>;
+    end: (status?: number) => void;
+    fail: (error: DownstreamError) => DownstreamError;
+  } {
+    const span: Span = trace
+      .getTracer('@genai/shared')
+      .startSpan(`${method} ${this.options.service}`, {
+        kind: SpanKind.CLIENT,
+        attributes: { 'http.request.method': method, 'genai.downstream': this.options.service },
+      });
+    const headers: Record<string, string> = {};
+    propagation.inject(trace.setSpan(context.active(), span), headers);
+    let ended = false;
+    return {
+      headers,
+      end: (status) => {
+        if (ended) return;
+        ended = true;
+        if (status !== undefined) span.setAttribute('http.response.status_code', status);
+        span.end();
+      },
+      fail: (error) => {
+        if (!ended) {
+          ended = true;
+          span.setAttributes({
+            'error.type': error.kind,
+            ...(error.status !== undefined && { 'http.response.status_code': error.status }),
+          });
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          span.end();
+        }
+        return error;
+      },
+    };
   }
 
   private transportError(error: unknown): DownstreamError {
