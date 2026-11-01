@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { CurrentPrincipal, RequireRoles, type AuthenticatedPrincipal } from '@genai/auth';
-import { Body, Controller, Get, Headers, HttpCode, Param, Post, Res } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, Inject, Param, Post, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { AgentRunner, AUDITOR_ROLE } from '../runner/agent-runner';
-import { ToolRegistry } from '../tools/tool-registry';
+import { TOOL_CATALOG, type ToolCatalog } from '../tools/tool-catalog';
 import { decisionSchema, startRunSchema } from './schemas';
 import { toRunView } from './run-view';
 
@@ -16,15 +16,16 @@ const requestIdFrom = (header: string | undefined): string =>
 export class RunsController {
   constructor(
     private readonly runner: AgentRunner,
-    private readonly tools: ToolRegistry,
+    @Inject(TOOL_CATALOG) private readonly tools: ToolCatalog,
   ) {}
 
   /** The tools this caller's roles allow: the same list the model is shown. */
   @Get('tools')
   @RequireRoles(USER_ROLE)
-  listTools(@CurrentPrincipal() caller: AuthenticatedPrincipal) {
+  async listTools(@CurrentPrincipal() caller: AuthenticatedPrincipal) {
+    const registry = await this.tools.registryFor(caller);
     return {
-      tools: this.tools.visibleTo(caller.roles).map((t) => ({
+      tools: registry.visibleTo(caller.roles).map((t) => ({
         name: t.name,
         description: t.description,
         risk: t.risk,

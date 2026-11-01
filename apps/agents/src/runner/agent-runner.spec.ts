@@ -673,3 +673,38 @@ describe('AgentRunner.get', () => {
     ).rejects.toBeInstanceOf(RunNotFoundError);
   });
 });
+
+describe('AgentRunner with tools from another source', () => {
+  const mcpWrite = () => fakeTool('crm__update_address', { risk: 'write' });
+
+  it('pauses for approval on an MCP write tool exactly like a built-in one', async () => {
+    const write = mcpWrite();
+    const model = new ScriptedModel([call('crm__update_address', { q: 'x' }), final('Done.')]);
+    const { runner } = buildRunner({ model, tools: [write.tool] });
+
+    const run = await runner.start(alice, { goal: 'g' }, 'r');
+
+    expect(run.status).toBe('awaiting_approval');
+    expect(write.executions).toHaveLength(0);
+  });
+
+  it('looks tools up again at approval: a tool the gateway no longer offers is not run', async () => {
+    const write = mcpWrite();
+    const model = new ScriptedModel([call('crm__update_address', { q: 'x' }), final('ok')]);
+    const built = buildRunner({ model, tools: [write.tool] });
+    const run = await built.runner.start(alice, { goal: 'g' }, 'r');
+
+    // the same run is now served by a catalog in which that tool has been withdrawn
+    const withdrawn = buildRunner({ model, tools: [] });
+    await withdrawn.store.save({ ...run, revision: 0 });
+    const done = await withdrawn.runner.decide(
+      alice,
+      run.id,
+      { callId: 'c1', decision: 'approve' },
+      'r',
+    );
+
+    expect(write.executions).toHaveLength(0);
+    expect(done.events.map((e) => e.type)).toContain('tool_denied');
+  });
+});

@@ -11,7 +11,7 @@ import { Guardrails } from '@genai/guardrails';
 import { HttpJsonClient } from '@genai/shared';
 import { Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
-import { GatewayClient, RetrievalClient } from './clients/service-clients';
+import { GatewayClient, McpGatewayClient, RetrievalClient } from './clients/service-clients';
 import { AGENTS_CONFIG, loadConfig, type AgentsConfig } from './config/config';
 import { HealthController } from './health.controller';
 import { AGENT_MODEL, GatewayAgentModel, type AgentModel } from './model/agent-model';
@@ -28,7 +28,13 @@ import {
   type Mailer,
   type TicketSystem,
 } from './tools/fake-backends';
-import { ToolRegistry } from './tools/tool-registry';
+import { McpToolSource } from './tools/mcp-tool-source';
+import {
+  CompositeToolCatalog,
+  TOOL_CATALOG,
+  type ToolCatalog,
+  type ToolSource,
+} from './tools/tool-catalog';
 
 const http = (service: string, url: string, timeoutMs: number): HttpJsonClient =>
   new HttpJsonClient({ service, baseUrl: url, timeoutMs });
@@ -73,23 +79,35 @@ const http = (service: string, url: string, timeoutMs: number): HttpJsonClient =
     { provide: TICKET_SYSTEM, useFactory: () => new InMemoryTicketSystem() },
     { provide: MAILER, useFactory: () => new InMemoryMailer() },
     {
-      provide: ToolRegistry,
-      inject: [AGENTS_CONFIG, RetrievalClient, TICKET_SYSTEM, MAILER],
+      provide: TOOL_CATALOG,
+      inject: [AGENTS_CONFIG, RetrievalClient, TICKET_SYSTEM, MAILER, OBO_CLIENT, Guardrails],
       useFactory: (
         c: AgentsConfig,
         retrieval: RetrievalClient,
         tickets: TicketSystem,
         mailer: Mailer,
-      ) =>
-        new ToolRegistry(
-          builtinTools({
-            retrieval,
-            retrievalScope: c.retrieval.scope,
-            tickets,
-            mailer,
-            emailAllowedDomains: c.emailAllowedDomains,
-          }),
-        ),
+        obo: OboTokenClient,
+        guardrails: Guardrails,
+      ) => {
+        const builtin = builtinTools({
+          retrieval,
+          retrievalScope: c.retrieval.scope,
+          tickets,
+          mailer,
+          emailAllowedDomains: c.emailAllowedDomains,
+        });
+        const sources: ToolSource[] = c.mcp
+          ? [
+              new McpToolSource(
+                new McpGatewayClient(http('mcp-gateway', c.mcp.url, c.limits.toolTimeoutMs)),
+                obo,
+                c.mcp.scope,
+                guardrails,
+              ),
+            ]
+          : [];
+        return new CompositeToolCatalog(builtin, sources);
+      },
     },
     {
       provide: AGENT_MODEL,
@@ -98,11 +116,11 @@ const http = (service: string, url: string, timeoutMs: number): HttpJsonClient =
     },
     {
       provide: AgentRunner,
-      inject: [RUN_STORE, AGENT_MODEL, ToolRegistry, Guardrails, OBO_CLIENT, AGENTS_CONFIG],
+      inject: [RUN_STORE, AGENT_MODEL, TOOL_CATALOG, Guardrails, OBO_CLIENT, AGENTS_CONFIG],
       useFactory: (
         store: RunStore,
         model: AgentModel,
-        tools: ToolRegistry,
+        tools: ToolCatalog,
         guardrails: Guardrails,
         obo: OboTokenClient,
         c: AgentsConfig,

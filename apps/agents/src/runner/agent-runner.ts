@@ -15,12 +15,14 @@ import { ModelProtocolError } from '../model/protocol';
 import type { RunStore } from '../store/run-store';
 import { ToolError, type AnyTool, type ToolContext } from '../tools/tool';
 import type { ToolRegistry } from '../tools/tool-registry';
+import type { ToolCatalog } from '../tools/tool-catalog';
 import { collectStrings, digest, isTimeout, stableStringify, truncate, withTimeout } from './util';
 
 export interface RunnerDeps {
   store: RunStore;
   model: AgentModel;
-  tools: ToolRegistry;
+  /** Decides, per caller, which tools exist: built-in ones plus any the MCP gateway allows them. */
+  tools: ToolCatalog;
   guardrails: Guardrails;
   obo: OboTokenClient;
   gatewayScope: string;
@@ -90,14 +92,15 @@ export class AgentRunner {
       updatedAt: stamp,
       revision: 0,
     };
+    const registry = await this.deps.tools.registryFor(caller);
     this.record(run, 'run_started', caller.userId, {
       goalChars: verdict.text.length,
       maxSteps,
-      tools: this.deps.tools.visibleTo(caller.roles).map((t) => t.name),
+      tools: registry.visibleTo(caller.roles).map((t) => t.name),
       redactions: verdict.report.redactions,
     });
 
-    return this.advance(await this.deps.store.save(run), caller, requestId);
+    return this.advance(await this.deps.store.save(run), caller, requestId, registry);
   }
 
   /** Reading a run: its owner, or an auditor in the same tenant. Another tenant's run does not exist. */
@@ -134,7 +137,9 @@ export class AgentRunner {
     }
 
     const call = pending.call;
-    const tool = this.deps.tools.resolve(call.name, caller.roles);
+    // Resolved again now, from what this caller may use now, not from what they could use before.
+    const registry = await this.deps.tools.registryFor(caller);
+    const tool = registry.resolve(call.name, caller.roles);
     run.pending = undefined;
     run.status = 'running';
     // The clock covers active work: time spent waiting for a person does not count against it.
@@ -161,21 +166,26 @@ export class AgentRunner {
     } else {
       current = await this.runTool(current, call, tool, caller, caller.userId, requestId);
     }
-    return this.advance(current, caller, requestId);
+    return this.advance(current, caller, requestId, registry);
   }
 
-  private async advance(run: Run, caller: AuthenticatedPrincipal, requestId: string): Promise<Run> {
+  private async advance(
+    run: Run,
+    caller: AuthenticatedPrincipal,
+    requestId: string,
+    registry: ToolRegistry,
+  ): Promise<Run> {
     let current = run;
     while (current.status === 'running') {
       if (this.now() >= current.deadlineAt) return this.fail(current, 'timeout');
 
       const call = current.queue.shift();
       if (call) {
-        current = await this.handleCall(current, call, caller, requestId);
+        current = await this.handleCall(current, call, caller, requestId, registry);
         continue;
       }
       if (current.steps >= current.maxSteps) return this.fail(current, 'step_limit');
-      current = await this.modelStep(current, caller, requestId);
+      current = await this.modelStep(current, caller, requestId, registry);
     }
     return current;
   }
@@ -184,8 +194,9 @@ export class AgentRunner {
     run: Run,
     caller: AuthenticatedPrincipal,
     requestId: string,
+    tools: ToolRegistry,
   ): Promise<Run> {
-    const { model, tools, guardrails, obo, gatewayScope, limits } = this.deps;
+    const { model, guardrails, obo, gatewayScope, limits } = this.deps;
     run.steps += 1;
 
     let response;
@@ -284,9 +295,10 @@ export class AgentRunner {
     call: ToolCall,
     caller: AuthenticatedPrincipal,
     requestId: string,
+    registry: ToolRegistry,
   ): Promise<Run> {
     // A tool the caller may not use is refused exactly like one that does not exist.
-    const tool = this.deps.tools.resolve(call.name, caller.roles);
+    const tool = registry.resolve(call.name, caller.roles);
     if (!tool) {
       return this.refuse(
         run,
