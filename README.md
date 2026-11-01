@@ -12,7 +12,7 @@ deployment.
 > `npm run demo -w @genai/e2e`), with **guardrails** against prompt injection, PII leaks and prompt
 > leaks (pattern-based, with documented limits), and an **agent** that uses tools as the user with
 > hard limits and a person's approval before any write, whose third-party tools come through an
-> **MCP gateway** (approved definitions, per-role access, an audit log), plus **observability** (one trace per request across services, SLO burn-rate alerts, and telemetry that is scanned for leaks), per-tenant **cost tracking**, a scoped **answer cache** (it can never hand one person another person's answer) and **guarded streaming**, and an **evaluation gate** that fails the build when answers get worse (every metric has a floor, a ratchet against a committed baseline, and a replay of known regressions that must each be caught). It all runs on **local stand-ins**: an in-memory queue, index and
+> **MCP gateway** (approved definitions, per-role access, an audit log), plus **delivery** (hardened images, a compose stack with real monitoring, a Helm chart and Terraform, none of it yet applied to Azure), **observability** (one trace per request across services, SLO burn-rate alerts, and telemetry that is scanned for leaks), per-tenant **cost tracking**, a scoped **answer cache** (it can never hand one person another person's answer) and **guarded streaming**, and an **evaluation gate** that fails the build when answers get worse (every metric has a floor, a ratchet against a committed baseline, and a replay of known regressions that must each be caught). It all runs on **local stand-ins**: an in-memory queue, index and
 > stores, a deterministic **mock model** (not an LLM), and locally generated signing keys instead of
 > Entra ID. Nothing has been run against real Azure yet.
 > The diagram below is the **target**, colour-coded by what exists today.
@@ -21,22 +21,22 @@ deployment.
 
 ✅ Done · 🚧 In progress · 📋 Planned
 
-| Area                 | Status     | What exists today                                                                                                                                                                                     | Still stubbed or missing                                                                       |
-| -------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Monorepo, CI, ADRs   | ✅ Done    | npm workspaces, strict TS, lint/format, commit hooks, GitHub Actions                                                                                                                                  | -                                                                                              |
-| LLM gateway          | ✅ Done    | Rate limits, token quotas, retries, fallback, error mapping                                                                                                                                           | Azure client untested against real Azure; no cache                                             |
-| Prompt registry      | ✅ Done    | Versions, audited rollback, sticky A/B, safe templates                                                                                                                                                | In-memory storage (no Cosmos DB yet)                                                           |
-| Ingestion pipeline   | ✅ Done    | Queue with DLQ, chunking per file type, idempotent; **writes to search with access lists** as its own service identity                                                                                | In-memory queue; no PDF/Office, no delete; 200 KB limit                                        |
-| Retrieval service    | ✅ Done    | BM25 + vector, rank fusion, rerank, role/tenant trimming                                                                                                                                              | Hash embedder (spelling, not meaning); in-memory                                               |
-| Auth (Entra ID)      | ✅ Done    | JWT validation, secure-by-default guard, role gates, OBO client                                                                                                                                       | Not run against real Entra ID; OBO and Key Vault not wired yet                                 |
-| **Vertical slice**   | ✅ Done    | Upload, ingest, index, then ask: `assistant` acts as the user, verifies citations; e2e over real HTTP                                                                                                 | Mock model (deterministic test double); nothing on real Azure                                  |
-| Guardrails           | ✅ Done    | PII/secret redaction, injection detection, canary and output checks; enforce or monitor mode                                                                                                          | Pattern-based: misses paraphrase, other languages, split attacks; assistant only               |
-| Agent orchestrator   | ✅ Done    | Tool calls as the user, step/time/loop limits, owner approval before any write, audit trail; poisoned tool output screened                                                                            | In-memory runs and stand-in tools; runs inside the request; owner-only approval                |
-| MCP gateway          | ✅ Done    | Default-deny registry, pinned tool definitions (a changed tool switches off), SSRF-safe egress, per-role access, audit log; the agent uses it                                                         | In-memory registry and audit log; Streamable HTTP and tools only; per-process rate limit       |
-| Cost and performance | ✅ Done    | Priced calls and per-tenant spend with a daily budget; answer cache scoped to what the model was given (off/shadow/serve); streaming with the output checks intact                                    | In-memory cache and spend; wording similarity, not a real embedding model; synthetic benchmark |
-| Evaluation pipeline  | ✅ Done    | 41 labelled cases through the real services; retrieval, groundedness (independent judge), citations, abstention, leaks; floors, a baseline ratchet, and 8 replayed regressions; runs in CI            | Scores calibrated to the stand-in model; small dataset; lexical judge                          |
-| Observability        | ✅ Done    | One trace across services (W3C `traceparent`), request and domain metrics, JSON logs; a privacy allowlist and a canary scan; 6 SLOs with burn-rate alerts, generated rules and dashboard, 10 runbooks | No collector, Prometheus or Grafana running yet; targets reasoned, not measured                |
-| Delivery             | 📋 Planned | -                                                                                                                                                                                                     | Docker, Helm, AKS, canary rollout, Bicep/Terraform                                             |
+| Area                 | Status  | What exists today                                                                                                                                                                                                                                                                               | Still stubbed or missing                                                                            |
+| -------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Monorepo, CI, ADRs   | ✅ Done | npm workspaces, strict TS, lint/format, commit hooks, GitHub Actions                                                                                                                                                                                                                            | -                                                                                                   |
+| LLM gateway          | ✅ Done | Rate limits, token quotas, retries, fallback, error mapping                                                                                                                                                                                                                                     | Azure client untested against real Azure; no cache                                                  |
+| Prompt registry      | ✅ Done | Versions, audited rollback, sticky A/B, safe templates                                                                                                                                                                                                                                          | In-memory storage (no Cosmos DB yet)                                                                |
+| Ingestion pipeline   | ✅ Done | Queue with DLQ, chunking per file type, idempotent; **writes to search with access lists** as its own service identity                                                                                                                                                                          | In-memory queue; no PDF/Office, no delete; 200 KB limit                                             |
+| Retrieval service    | ✅ Done | BM25 + vector, rank fusion, rerank, role/tenant trimming                                                                                                                                                                                                                                        | Hash embedder (spelling, not meaning); in-memory                                                    |
+| Auth (Entra ID)      | ✅ Done | JWT validation, secure-by-default guard, role gates, OBO client                                                                                                                                                                                                                                 | Not run against real Entra ID; OBO and Key Vault not wired yet                                      |
+| **Vertical slice**   | ✅ Done | Upload, ingest, index, then ask: `assistant` acts as the user, verifies citations; e2e over real HTTP                                                                                                                                                                                           | Mock model (deterministic test double); nothing on real Azure                                       |
+| Guardrails           | ✅ Done | PII/secret redaction, injection detection, canary and output checks; enforce or monitor mode                                                                                                                                                                                                    | Pattern-based: misses paraphrase, other languages, split attacks; assistant only                    |
+| Agent orchestrator   | ✅ Done | Tool calls as the user, step/time/loop limits, owner approval before any write, audit trail; poisoned tool output screened                                                                                                                                                                      | In-memory runs and stand-in tools; runs inside the request; owner-only approval                     |
+| MCP gateway          | ✅ Done | Default-deny registry, pinned tool definitions (a changed tool switches off), SSRF-safe egress, per-role access, audit log; the agent uses it                                                                                                                                                   | In-memory registry and audit log; Streamable HTTP and tools only; per-process rate limit            |
+| Cost and performance | ✅ Done | Priced calls and per-tenant spend with a daily budget; answer cache scoped to what the model was given (off/shadow/serve); streaming with the output checks intact                                                                                                                              | In-memory cache and spend; wording similarity, not a real embedding model; synthetic benchmark      |
+| Evaluation pipeline  | ✅ Done | 41 labelled cases through the real services; retrieval, groundedness (independent judge), citations, abstention, leaks; floors, a baseline ratchet, and 8 replayed regressions; runs in CI                                                                                                      | Scores calibrated to the stand-in model; small dataset; lexical judge                               |
+| Observability        | ✅ Done | One trace across services (W3C `traceparent`), request and domain metrics, JSON logs; a privacy allowlist and a canary scan; 6 SLOs with burn-rate alerts, generated rules and dashboard, 10 runbooks                                                                                           | Run in compose, not yet in Kubernetes; targets reasoned, not measured                               |
+| Delivery             | ✅ Done | One hardened image recipe (non-root, no npm, scanned); a compose stack with real Prometheus, Grafana and Jaeger that passes a smoke test and shows the alert firing; a Helm chart (network closed by default, canary releases judged on the SLOs); Terraform for AKS, vault, identities, OpenAI | Never applied to Azure or a cluster; Argo Rollouts, the CSI driver and workload identity unverified |
 
 ## Architecture (target)
 
@@ -84,13 +84,14 @@ Everything below was produced by running the code in this repository.
 | `@genai/prompt-registry`             | 59       |
 | `@genai/ingestion`                   | 84       |
 | `@genai/retrieval`                   | 71       |
-| `@genai/auth`                        | 70       |
+| `@genai/auth`                        | 77       |
 | `@genai/guardrails`                  | 90       |
 | `@genai/shared`                      | 36       |
 | `@genai/e2e` (all services together) | 97       |
 | `@genai/evals` (the quality gate)    | 92       |
-| `@genai/observability`               | 83       |
-| **Total**                            | **1220** |
+| `@genai/observability`               | 85       |
+| `@genai/delivery` (chart policy)     | 39       |
+| **Total**                            | **1268** |
 
 Format check, lint, typecheck and build also pass in CI. Many are end-to-end HTTP tests (failure
 injection, tenant isolation, access trimming, forged and expired tokens, spoofed headers). The 97
@@ -147,6 +148,28 @@ alert tiers: a total outage pages within ten minutes, a two-minute blip pages no
 leak only raises a ticket. The end-to-end canary scan puts a question, a document, an IBAN and a token
 through the real services and searches dozens of spans, every metric point and every log line for them: none
 found.
+
+Delivery (ADR 0016) was checked by running what can be run. The seven images build and scan clean at high
+and critical severity (the first scan found eleven findings: ten were npm's own modules, removed from the
+image, and one is a recorded exception that expires on 2026-12-15). The compose stack runs them with a real
+Prometheus, Grafana and Jaeger, and its smoke test passes from a fresh start: a document is ingested and
+answered with citations, another tenant's user does not get it, an attack and an unauthenticated request are
+refused, one trace spans four services, 7 of 7 targets are scraped, and the 78 generated rules load with none
+unhealthy. Running it found a real bug in the earlier step (the metrics endpoint listened on the IPv6
+loopback only), now fixed with a test that fails on the old behaviour. The Helm chart renders 58 resources
+that validate against the Kubernetes and CRD schemas, and 39 policy tests check it against the Terraform and
+the SLOs; breaking the chart, the Terraform or the canary thresholds on purpose seventeen ways was caught
+by those tests every time. What has not been done: nothing was applied to Azure or a cluster.
+
+**An outage, rehearsed** (`deploy/compose/prove-alerts.sh`): the retrieval service is stopped while
+questions keep arriving, and the alert the SLO code generated goes off:
+
+```text
+before: AssistantAvailabilityFastBurn is inactive, 5m error ratio 0
++0s    AssistantAvailabilityFastBurn: inactive (5m error ratio 0)
++45s   AssistantAvailabilityFastBurn: pending (5m error ratio 0.7121)
++166s  AssistantAvailabilityFastBurn: firing (5m error ratio 0.8985)
+```
 
 **A real run** (`npm run -s demo -w @genai/e2e`): documents are uploaded through the ingestion
 service, then the same question is asked by callers with different roles. Abridged:
@@ -404,6 +427,9 @@ reveal what the asking user may already read.
 | `packages/shared`        | `@genai/shared`: tenant context and cross-service helpers                                                           |
 | `packages/observability` | `@genai/observability`: traces, metrics, logs, SLOs and alert generation ([docs](packages/observability/README.md)) |
 | `tests/e2e`              | The real services together over HTTP, plus the runnable demo and benchmark                                          |
+| `tests/delivery`         | Chart policy tests: hardening, network, secrets, canary, agreement with Terraform and the SLOs                      |
+| `deploy/`                | Compose stack and Helm chart ([docs](deploy/README.md))                                                             |
+| `infra/terraform`        | Azure infrastructure ([docs](infra/terraform/README.md))                                                            |
 | `tests/evals`            | The quality gate: labelled cases, judge, thresholds and baseline ([docs](tests/evals/README.md))                    |
 | `docs/adr`               | Architecture decision records: why X over Y                                                                         |
 | `docs/runbooks`          | What to do when each alert fires                                                                                    |
@@ -478,7 +504,10 @@ building the remaining pieces, so there is always a demonstrable system.
       JSON logs tied to traces, an allowlist so telemetry cannot carry what the platform protects
       (checked by a canary scan), six SLOs with multi-window burn-rate alerts, Prometheus rules and a
       Grafana dashboard generated from the same definitions, and a runbook behind every alert (ADR 0015)
-- [ ] **Step 14: Delivery.** Docker, Helm, AKS, canary rollout, Bicep/Terraform
+- [x] **Step 14: Delivery.** One multi-stage Dockerfile (non-root, no npm, vulnerability scan), a compose
+      stack with real Prometheus, Grafana and Jaeger and a smoke test, a Helm chart with a closed
+      network and SLO-gated canary releases, and Terraform for AKS, Key Vault, per-service identities and
+      Azure OpenAI; chart, Terraform and SLOs are tested against each other (ADR 0016)
 - [ ] **Step 15: Proof.** Load-test results, cost-savings numbers, eval scores
 
 ## Decisions
