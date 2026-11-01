@@ -1,0 +1,11 @@
+# Findings we have looked at and accepted, each with a reason and a date it must be looked at again.
+# After that date the finding fails the scan again.
+vulnerabilities:
+  - id: CVE-2026-113872
+    paths:
+      - 'repo/node_modules/multer/package.json'
+    statement: >
+      multer is pulled in by @nestjs/platform-express 11.x, which pins it to 2.4.0 (the fix is 2.5.0,
+      shipped with platform-express 12). No service uses file uploads or multer's file filter, and none
+      of them can reach it: no controller has a file interceptor. Remove this entry when Nest is upgraded.
+    expired_at: 2026-12-15

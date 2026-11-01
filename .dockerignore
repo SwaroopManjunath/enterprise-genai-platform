@@ -12,6 +12,7 @@
 tests/**
 !tests/e2e/package.json
 !tests/evals/package.json
+!tests/delivery/package.json
 docs
 ops
 deploy

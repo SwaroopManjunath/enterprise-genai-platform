@@ -11,6 +11,7 @@ COPY apps ./apps
 COPY packages ./packages
 COPY tests/e2e/package.json tests/e2e/package.json
 COPY tests/evals/package.json tests/evals/package.json
+COPY tests/delivery/package.json tests/delivery/package.json
 RUN npm ci --ignore-scripts
 ARG SERVICE
 RUN test -n "$SERVICE" && test -d "apps/$SERVICE" || (echo "set --build-arg SERVICE=<one of apps/*>" && exit 1)
@@ -25,6 +26,7 @@ COPY apps ./apps
 COPY packages ./packages
 COPY tests/e2e/package.json tests/e2e/package.json
 COPY tests/evals/package.json tests/evals/package.json
+COPY tests/delivery/package.json tests/delivery/package.json
 ARG SERVICE
 RUN npm ci --ignore-scripts --omit=dev --workspace "@genai/$SERVICE" \
  && npm cache clean --force
@@ -35,6 +37,9 @@ ARG SERVICE
 ENV NODE_ENV=production \
     SERVICE=${SERVICE} \
     PORT=3000
+# npm and corepack are build tools: the service never runs them, and their bundled modules are the
+# image's most frequent source of vulnerability reports. Removing them also removes a way to install more.
+RUN rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-*
 WORKDIR /repo
 COPY --from=deps --chown=root:root /repo/node_modules ./node_modules
 COPY --from=build /repo/packages/shared/package.json ./packages/shared/package.json
