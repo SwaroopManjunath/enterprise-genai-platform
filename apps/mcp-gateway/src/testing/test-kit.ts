@@ -92,3 +92,27 @@ export function buildKit(
     config,
   };
 }
+
+import { RateLimiter } from '../invoke/rate-limiter';
+import { ToolInvoker } from '../invoke/tool-invoker';
+
+export function buildInvoker(
+  kit: Kit,
+  options: { verifyTtlMs?: number; maxResultChars?: number; ratePerMinute?: number } = {},
+): ToolInvoker {
+  return new ToolInvoker({
+    store: kit.store,
+    registry: kit.registry,
+    audit: kit.audit,
+    client: kit.client,
+    auth: kit.upstreamAuth,
+    validator: kit.validator,
+    guardrails: kit.guardrails,
+    limiter: new RateLimiter(options.ratePerMinute ?? 100, () => clock.now),
+    limits: {
+      verifyTtlMs: options.verifyTtlMs ?? 60_000,
+      maxResultChars: options.maxResultChars ?? 500,
+    },
+    now: () => clock.now,
+  });
+}

@@ -96,6 +96,7 @@ export interface AuditEntry {
   durationMs?: number;
   resultChars?: number;
   withheld?: boolean;
-  redactions?: { type: string; count: number }[];
+  /** Sensitive data was removed from the result before it was returned. */
+  redacted?: boolean;
   requestId?: string;
 }
