@@ -8,10 +8,13 @@ import {
   type SecretProvider,
 } from '@genai/auth';
 import { Guardrails } from '@genai/guardrails';
+import { ANSWER_CACHE, InMemoryAnswerCache, type AnswerCache } from './cache/answer-cache';
+import { CacheLayer } from './cache/cache-layer';
+import { CacheStatsTracker } from './cache/cache-stats';
 import { HttpJsonClient } from '@genai/shared';
 import { Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
-import { AskController } from './ask/ask.controller';
+import { AskController, CacheController } from './ask/ask.controller';
 import { AskExceptionFilter } from './ask/ask-exception.filter';
 import { AskService } from './ask/ask.service';
 import { GatewayClient, PromptClient, RetrievalClient } from './clients/service-clients';
@@ -22,7 +25,7 @@ const http = (service: string, url: string, c: AssistantConfig): HttpJsonClient 
   new HttpJsonClient({ service, baseUrl: url, timeoutMs: c.downstreamTimeoutMs });
 
 @Module({
-  controllers: [HealthController, AskController],
+  controllers: [HealthController, AskController, CacheController],
   providers: [
     { provide: ASSISTANT_CONFIG, useFactory: () => loadConfig() },
     // Env-backed locally. In Azure, wire KeyVaultSecretProvider with a managed identity here.
@@ -61,6 +64,23 @@ const http = (service: string, url: string, c: AssistantConfig): HttpJsonClient 
       useFactory: (c: AssistantConfig) =>
         new Guardrails({ mode: c.guardrails.mode, outputPii: c.guardrails.outputPii }),
     },
+    { provide: CacheStatsTracker, useFactory: () => new CacheStatsTracker() },
+    {
+      provide: ANSWER_CACHE,
+      inject: [ASSISTANT_CONFIG],
+      useFactory: (c: AssistantConfig) =>
+        new InMemoryAnswerCache({
+          ttlMs: c.cache.ttlMs,
+          maxEntriesPerTenant: c.cache.maxEntriesPerTenant,
+          similarity: c.cache.similarity,
+        }),
+    },
+    {
+      provide: CacheLayer,
+      inject: [ASSISTANT_CONFIG, ANSWER_CACHE, CacheStatsTracker],
+      useFactory: (c: AssistantConfig, cache: AnswerCache, stats: CacheStatsTracker) =>
+        new CacheLayer(c.cache.mode, cache, stats, c.cache.epoch),
+    },
     {
       provide: AskService,
       inject: [
@@ -70,6 +90,7 @@ const http = (service: string, url: string, c: AssistantConfig): HttpJsonClient 
         OBO_CLIENT,
         ASSISTANT_CONFIG,
         Guardrails,
+        CacheLayer,
       ],
       useFactory: (
         retrieval: RetrievalClient,
@@ -78,7 +99,8 @@ const http = (service: string, url: string, c: AssistantConfig): HttpJsonClient 
         obo: OboTokenClient,
         config: AssistantConfig,
         guardrails: Guardrails,
-      ) => new AskService({ retrieval, prompts, gateway, obo }, config, guardrails),
+        cache: CacheLayer,
+      ) => new AskService({ retrieval, prompts, gateway, obo }, config, guardrails, cache),
     },
     { provide: APP_FILTER, useClass: AskExceptionFilter },
     ...authProviders(),

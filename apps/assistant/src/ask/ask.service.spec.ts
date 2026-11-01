@@ -2,6 +2,9 @@ import type { AuthenticatedPrincipal, OboTokenClient } from '@genai/auth';
 import { BLOCKED_ANSWER, Guardrails } from '@genai/guardrails';
 import { DownstreamError } from '@genai/shared';
 import type { GatewayClient, PromptClient, RetrievalClient } from '../clients/service-clients';
+import { InMemoryAnswerCache } from '../cache/answer-cache';
+import { CacheLayer, type CacheMode } from '../cache/cache-layer';
+import { CacheStatsTracker } from '../cache/cache-stats';
 import { AskService, NO_SOURCES_ANSWER } from './ask.service';
 import { GuardrailBlockedError } from './errors';
 
@@ -32,7 +35,13 @@ const refundHit = {
 };
 
 function setup(
-  overrides: { hits?: unknown[]; answer?: string; mode?: 'enforce' | 'monitor' } = {},
+  overrides: {
+    hits?: unknown[];
+    answer?: string;
+    mode?: 'enforce' | 'monitor';
+    cache?: CacheMode;
+    promptVersion?: number;
+  } = {},
 ) {
   const obo = {
     exchange: jest.fn((_token: string, scope: string) => Promise.resolve(`tok:${scope}`)),
@@ -47,7 +56,7 @@ function setup(
         input: { variables: { sources: string; question: string } },
       ) =>
         Promise.resolve({
-          version: 3,
+          version: overrides.promptVersion ?? 3,
           rendered: `REGISTRY PROMPT\nSources:\n${input.variables.sources}\nQuestion: ${input.variables.question}`,
         }),
     ),
@@ -58,8 +67,18 @@ function setup(
       usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
       provider: 'mock-grounded',
       fallbackUsed: false,
+      cost: { microUsd: 700, priced: true },
     }),
   };
+  const stats = new CacheStatsTracker();
+  const cache = overrides.cache
+    ? new CacheLayer(
+        overrides.cache,
+        new InMemoryAnswerCache({ ttlMs: 60_000, maxEntriesPerTenant: 50, similarity: 0.92 }),
+        stats,
+        '1',
+      )
+    : undefined;
   const service = new AskService(
     {
       retrieval: retrieval as unknown as RetrievalClient,
@@ -69,8 +88,9 @@ function setup(
     },
     config,
     new Guardrails({ mode: overrides.mode ?? 'enforce' }),
+    cache,
   );
-  return { service, obo, retrieval, prompts, gateway };
+  return { service, obo, retrieval, prompts, gateway, stats };
 }
 
 const ask = (service: AskService, question = 'How long do refunds take?', extra = {}) =>
@@ -410,5 +430,230 @@ describe('AskService guardrails', () => {
       sources: { scanned: 1, quarantined: 0 },
       output: { blocked: false, reasons: [], redactions: [], sanitized: 0 },
     });
+  });
+});
+
+describe('AskService answer cache', () => {
+  const salaryHit = {
+    chunkId: 'salary:0',
+    documentId: 'salary',
+    text: '# Salary bands\nManagers start at level M1.',
+    metadata: { headingPath: ['Salary bands'] },
+    score: 1.1,
+  };
+
+  it('does nothing when it is off: no cache field, a model call every time', async () => {
+    const { service, gateway } = setup();
+
+    const first = await ask(service);
+    await ask(service);
+
+    expect(first.cache).toBeUndefined();
+    expect(gateway.chat).toHaveBeenCalledTimes(2);
+  });
+
+  it('serves a repeat from the cache, saving the model call and saying what it saved', async () => {
+    const { service, gateway, retrieval, stats } = setup({ cache: 'serve' });
+
+    const first = await ask(service);
+    const second = await ask(service, 'how LONG do refunds take?');
+
+    expect(first.cache).toEqual({ status: 'miss' });
+    expect(second.cache).toEqual({
+      status: 'hit',
+      kind: 'exact',
+      similarity: 1,
+      savedTokens: 15,
+      savedMicroUsd: 700,
+    });
+    expect(second).toMatchObject({
+      answer: first.answer,
+      citations: first.citations,
+      grounded: true,
+      sourcesRetrieved: 1,
+    });
+    expect(second.usage).toBeUndefined(); // no model was called
+    expect(second.timings.modelMs).toBeUndefined();
+    expect(gateway.chat).toHaveBeenCalledTimes(1);
+    expect(retrieval.search).toHaveBeenCalledTimes(2); // access is decided again on every request
+    expect(stats.get('acme-bank')).toMatchObject({
+      hits: 1,
+      misses: 1,
+      stores: 1,
+      savedMicroUsd: 700,
+    });
+  });
+
+  it('serves a close rewording, and reports it as a semantic hit', async () => {
+    const { service, gateway } = setup({ cache: 'serve' });
+    await ask(service, 'How long do refunds take?');
+
+    const second = await ask(service, 'how long does a refund take');
+
+    expect(second.cache).toMatchObject({ status: 'hit', kind: 'semantic' });
+    expect(gateway.chat).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not serve a different question, nor one that differs in a number or a negation', async () => {
+    const { service, gateway } = setup({ cache: 'serve' });
+    await ask(service, 'Is the refund limit 150 euros?');
+
+    expect((await ask(service, 'Is the refund limit 200 euros?')).cache?.status).toBe('miss');
+    expect((await ask(service, 'Is the refund limit not 150 euros?')).cache?.status).toBe('miss');
+    expect((await ask(service, 'What is the weather?')).cache?.status).toBe('miss');
+    expect(gateway.chat).toHaveBeenCalledTimes(4);
+  });
+
+  describe('it cannot be used to see what you may not see', () => {
+    it('does not hand a restricted answer to a user who is shown fewer documents', async () => {
+      const { service, gateway, retrieval } = setup({ cache: 'serve' });
+      retrieval.search.mockResolvedValueOnce([refundHit, salaryHit]); // a manager
+      const asManager = await ask(service, 'What are the refund rules and salary bands?', {});
+      retrieval.search.mockResolvedValueOnce([refundHit]); // an analyst: the salary chunk is trimmed
+
+      const asAnalyst = await ask(service, 'What are the refund rules and salary bands?');
+
+      expect(asManager.cache?.status).toBe('miss');
+      expect(asAnalyst.cache?.status).toBe('miss');
+      expect(gateway.chat).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not hand a general answer to a user who is now shown a restricted document either', async () => {
+      const { service, gateway, retrieval } = setup({ cache: 'serve' });
+      retrieval.search.mockResolvedValueOnce([refundHit]);
+      await ask(service);
+      retrieval.search.mockResolvedValueOnce([refundHit, salaryHit]);
+
+      const second = await ask(service);
+
+      expect(second.cache?.status).toBe('miss');
+      expect(gateway.chat).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not serve an answer after a document it was built from changed', async () => {
+      const { service, gateway, retrieval } = setup({ cache: 'serve' });
+      await ask(service);
+      retrieval.search.mockResolvedValueOnce([
+        { ...refundHit, text: '# Refunds\nRefunds take TEN days.' },
+      ]);
+
+      const second = await ask(service);
+
+      expect(second.cache?.status).toBe('miss');
+      expect(gateway.chat).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps tenants apart even when the documents happen to be identical', async () => {
+      const { service, gateway } = setup({ cache: 'serve' });
+      await ask(service);
+
+      const other = await service.ask(
+        { ...caller, tenantId: 'globex' },
+        { question: 'How long do refunds take?' },
+        'req-2',
+      );
+
+      expect(other.cache?.status).toBe('miss');
+      expect(gateway.chat).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not serve across prompt versions, such as the two arms of an A/B test', async () => {
+      const first = setup({ cache: 'serve', promptVersion: 3 });
+      await ask(first.service);
+      const sharedCache = first;
+      sharedCache.prompts.resolve.mockImplementation(
+        (_t: string, _n: string, input: { variables: { sources: string; question: string } }) =>
+          Promise.resolve({ version: 4, rendered: `V4\n${input.variables.sources}` }),
+      );
+
+      const second = await ask(sharedCache.service);
+
+      expect(second.cache?.status).toBe('miss');
+      expect(sharedCache.gateway.chat).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('lets a caller insist on a fresh answer, and does not read the cache for it', async () => {
+    const { service, gateway, stats } = setup({ cache: 'serve' });
+    await ask(service);
+
+    const fresh = await ask(service, 'How long do refunds take?', { noCache: true });
+
+    expect(fresh.cache).toEqual({ status: 'bypass' });
+    expect(gateway.chat).toHaveBeenCalledTimes(2);
+    expect(stats.get('acme-bank').bypasses).toBe(1);
+  });
+
+  it('keeps only clean, grounded answers: nothing blocked, ungrounded or with an invented citation', async () => {
+    for (const answer of ['I am not sure.', 'Five days. [9]']) {
+      const { service, gateway } = setup({ cache: 'serve', answer });
+      await ask(service);
+      await ask(service);
+      expect(gateway.chat).toHaveBeenCalledTimes(2);
+    }
+  });
+
+  describe('shadow mode', () => {
+    it('always answers freshly, and records whether the cache would have been right', async () => {
+      const { service, gateway, stats } = setup({ cache: 'shadow' });
+
+      const first = await ask(service);
+      const second = await ask(service);
+
+      expect(first.cache).toEqual({ status: 'shadow', wouldHit: false });
+      expect(second.cache).toMatchObject({
+        status: 'shadow',
+        wouldHit: true,
+        kind: 'exact',
+        agreed: true,
+      });
+      expect(second.usage).toBeDefined(); // a model was called both times
+      expect(gateway.chat).toHaveBeenCalledTimes(2);
+      expect(stats.get('acme-bank')).toMatchObject({ hits: 0 });
+      expect(stats.get('acme-bank').shadow).toMatchObject({
+        lookups: 2,
+        wouldHit: 1,
+        agreed: 1,
+        agreementRate: 1,
+        potentialSavedMicroUsd: 700,
+      });
+    });
+
+    it('counts a disagreement when the fresh answer differs from the cached one', async () => {
+      const { service, gateway, stats } = setup({ cache: 'shadow' });
+      await ask(service);
+      gateway.chat.mockResolvedValueOnce({
+        message: { role: 'assistant', content: 'Roughly a week. [1]' },
+        usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+        provider: 'mock-grounded',
+        fallbackUsed: false,
+        cost: { microUsd: 700, priced: true },
+      });
+
+      const second = await ask(service);
+
+      expect(second.cache).toMatchObject({ wouldHit: true, agreed: false });
+      expect(stats.get('acme-bank').shadow).toMatchObject({ disagreed: 1, agreementRate: 0 });
+    });
+  });
+
+  it('reports where the time went', async () => {
+    let now = 0;
+    const { service } = setup();
+    const timed = new AskService(
+      (service as unknown as { clients: ConstructorParameters<typeof AskService>[0] }).clients,
+      config,
+      new Guardrails({ mode: 'enforce' }),
+      undefined,
+      () => (now += 10),
+    );
+
+    const result = await timed.ask(caller, { question: 'How long do refunds take?' }, 'req-1');
+
+    expect(result.timings.retrievalMs).toBeGreaterThan(0);
+    expect(result.timings.modelMs).toBeGreaterThan(0);
+    expect(result.timings.totalMs).toBeGreaterThanOrEqual(
+      result.timings.retrievalMs + (result.timings.modelMs ?? 0),
+    );
   });
 });
