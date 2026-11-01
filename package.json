@@ -22,7 +22,9 @@
     "prepare": "husky",
     "eval": "npm run build -w @genai/shared && npm run build -w @genai/auth && npm run build -w @genai/guardrails && npm run build -w @genai/observability && npm run eval -w @genai/evals",
     "eval:selftest": "npm run build -w @genai/shared && npm run build -w @genai/auth && npm run build -w @genai/guardrails && npm run build -w @genai/observability && npm run eval:selftest -w @genai/evals",
-    "eval:baseline": "npm run build -w @genai/shared && npm run build -w @genai/auth && npm run build -w @genai/guardrails && npm run build -w @genai/observability && npm run eval:baseline -w @genai/evals"
+    "eval:baseline": "npm run build -w @genai/shared && npm run build -w @genai/auth && npm run build -w @genai/guardrails && npm run build -w @genai/observability && npm run eval:baseline -w @genai/evals",
+    "ops:generate": "npm run ops:generate -w @genai/observability",
+    "ops:check": "npm run ops:check -w @genai/observability"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.8.0",
