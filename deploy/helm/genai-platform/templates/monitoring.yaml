@@ -1,0 +1,41 @@
+{{- if .Values.monitoring.serviceMonitor.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: genai-platform
+  labels:
+    app.kubernetes.io/part-of: genai-platform
+    {{- with .Values.monitoring.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: genai-platform
+      genai.dev/metrics: "true"
+  namespaceSelector:
+    matchNames: [{{ .Release.Namespace }}]
+  endpoints:
+    - port: metrics
+      interval: {{ .Values.monitoring.serviceMonitor.interval }}
+      # Our metrics carry their own `service` label (the platform service). Without this, Prometheus
+      # would rename it to exported_service and every SLO rule would read nothing.
+      honorLabels: true
+{{- end }}
+{{- if .Values.monitoring.prometheusRule.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: genai-platform-slo
+  labels:
+    app.kubernetes.io/part-of: genai-platform
+    {{- with .Values.monitoring.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  # Generated from the SLO definitions (npm run ops:generate); the same file the compose stack loads.
+  groups:
+    {{- (.Files.Get "files/rules.yaml" | fromYaml).groups | toYaml | nindent 4 }}
+{{- end }}

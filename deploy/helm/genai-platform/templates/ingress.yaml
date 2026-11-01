@@ -1,0 +1,38 @@
+{{- if .Values.ingress.enabled }}
+{{- range $name, $svc := .Values.services }}
+{{- if and $svc.enabled $svc.public }}
+{{- $ctx := dict "root" $ "name" $name "svc" $svc }}
+{{- $host := printf "%s.%s" $name (required "ingress.domain is required when ingress is enabled" $.Values.ingress.domain) }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "genai.labels" $ctx | nindent 4 }}
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    {{- with $.Values.ingress.clusterIssuer }}
+    cert-manager.io/cluster-issuer: {{ . | quote }}
+    {{- end }}
+    {{- range $key, $value := ($svc.ingressAnnotations | default dict) }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  ingressClassName: {{ $.Values.ingress.className }}
+  tls:
+    - hosts: [{{ $host | quote }}]
+      secretName: {{ $name }}-tls
+  rules:
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $name }}
+                port: { name: http }
+{{- end }}
+{{- end }}
+{{- end }}

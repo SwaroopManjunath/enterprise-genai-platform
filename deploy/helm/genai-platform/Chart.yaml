@@ -1,0 +1,6 @@
+apiVersion: v2
+name: genai-platform
+description: The seven services of the enterprise GenAI platform, their policies, alerts and canary rollouts.
+type: application
+version: 0.1.0
+appVersion: '0.1.0'

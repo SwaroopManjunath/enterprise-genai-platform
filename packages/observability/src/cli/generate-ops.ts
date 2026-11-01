@@ -6,6 +6,8 @@ import { renderDashboard, renderRules } from '../slo';
 export const OUTPUTS: Record<string, () => string> = {
   'ops/prometheus/rules.yaml': renderRules,
   'ops/grafana/genai-platform.json': renderDashboard,
+  // The chart ships the same rules, so what Prometheus runs in Kubernetes is what the code defines.
+  'deploy/helm/genai-platform/files/rules.yaml': renderRules,
 };
 
 /**

@@ -1,0 +1,47 @@
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.enabled }}
+{{- $ctx := dict "root" $ "name" $name "svc" $svc }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "genai.labels" $ctx | nindent 4 }}
+  annotations:
+    azure.workload.identity/client-id: {{ required (printf "serviceIdentities.%s is required (Terraform output service_identity_client_ids)" $name) (index $.Values.serviceIdentities $name) | quote }}
+    azure.workload.identity/tenant-id: {{ required "azure.tenantId is required" $.Values.azure.tenantId | quote }}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "genai.labels" $ctx | nindent 4 }}
+    genai.dev/metrics: "true"
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "genai.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - { name: http, port: {{ include "genai.port" $ctx }}, targetPort: http }
+    - { name: metrics, port: {{ $.Values.telemetry.metricsPort }}, targetPort: metrics }
+{{- if and $.Values.rollouts.enabled $svc.canary }}
+---
+# The canary's own address, so the analysis and a smoke test can reach it before it is promoted.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-canary
+  labels:
+    {{- include "genai.labels" $ctx | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "genai.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - { name: http, port: {{ include "genai.port" $ctx }}, targetPort: http }
+{{- end }}
+{{- end }}
+{{- end }}
