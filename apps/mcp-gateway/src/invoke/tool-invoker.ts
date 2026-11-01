@@ -189,7 +189,7 @@ export class ToolInvoker {
     base: object,
     started: number,
   ): Promise<McpServer> {
-    if (this.deps.now() - server.lastVerifiedAt <= this.deps.limits.verifyTtlMs) return server;
+    if (this.deps.now() - server.lastVerifiedAt < this.deps.limits.verifyTtlMs) return server;
 
     try {
       const bearer = await this.deps.auth.bearerFor(server.auth, caller);
