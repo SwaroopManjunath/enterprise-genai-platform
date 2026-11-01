@@ -4,9 +4,9 @@ Traces, metrics and logs for every service, and the service-level objectives, al
 on them. One library, so the rules about what telemetry may say are kept in one place.
 See [ADR 0015](../../docs/adr/0015-observability.md) for why it is built this way.
 
-> **Honest limits.** Nothing here has run against a real collector, Prometheus or Grafana yet (Step 14
-> deploys them). The alert rules are checked by our own tests, not by `promtool`, and the targets are
-> reasoned rather than measured against real traffic.
+> **Honest limits.** The rules and dashboard have run against a real Prometheus and Grafana in the
+> compose stack ([`deploy/`](../../deploy/README.md)), not in Kubernetes. They are not checked with
+> `promtool`, and the targets are reasoned rather than measured against real traffic.
 
 ## Use
 
